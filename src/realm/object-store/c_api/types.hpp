@@ -153,8 +153,8 @@ protected:
     realm_thread_safe_reference() {}
 };
 
-struct realm_config : realm::c_api::WrapC, realm::Realm::Config {
-    using Config::Config;
+struct realm_config : realm::c_api::WrapC, realm::RealmConfig {
+    using RealmConfig::RealmConfig;
 };
 
 // LCOV_EXCL_START

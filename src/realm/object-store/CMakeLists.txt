@@ -1,19 +1,20 @@
 add_subdirectory(c_api)
 
 set(SOURCES
+    audit.mm
     binding_callback_thread_observer.cpp
-    collection_notifications.cpp
-    index_set.cpp
     collection.cpp
+    collection_notifications.cpp
     dictionary.cpp
+    index_set.cpp
     list.cpp
     object.cpp
     object_changeset.cpp
     object_schema.cpp
     object_store.cpp
     results.cpp
-    set.cpp
     schema.cpp
+    set.cpp
     shared_realm.cpp
     thread_safe_reference.cpp
 
@@ -35,14 +36,16 @@ set(SOURCES
     util/uv/scheduler.hpp)
 
 set(HEADERS
+    audit.hpp
+    audit_serializer.hpp
     binding_callback_thread_observer.hpp
     binding_context.hpp
+    collection.hpp
     collection_notifications.hpp
+    dictionary.hpp
     feature_checks.hpp
     index_set.hpp
     keypath_helpers.hpp
-    collection.hpp
-    dictionary.hpp
     list.hpp
     object.hpp
     object_accessor.hpp
@@ -51,8 +54,8 @@ set(HEADERS
     object_store.hpp
     property.hpp
     results.hpp
-    set.hpp
     schema.hpp
+    set.hpp
     shared_realm.hpp
     thread_safe_reference.hpp
 

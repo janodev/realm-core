@@ -96,7 +96,7 @@ RLM_API void realm_config_set_migration_function(realm_config_t* config, realm_m
         config->migration_function = std::move(migration_func);
     }
     else {
-        config->migration_function = Realm::MigrationFunction{};
+        config->migration_function = nullptr;
     }
 }
 
@@ -113,7 +113,7 @@ RLM_API void realm_config_set_data_initialization_function(realm_config_t* confi
         config->initialization_function = std::move(init_func);
     }
     else {
-        config->initialization_function = Realm::DataInitializationFunction{};
+        config->initialization_function = nullptr;
     }
 }
 
@@ -128,7 +128,7 @@ RLM_API void realm_config_set_should_compact_on_launch_function(realm_config_t* 
         config->should_compact_on_launch_function = std::move(should_func);
     }
     else {
-        config->should_compact_on_launch_function = Realm::ShouldCompactOnLaunchFunction{};
+        config->should_compact_on_launch_function = nullptr;
     }
 }
 

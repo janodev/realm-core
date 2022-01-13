@@ -171,7 +171,8 @@ struct SyncTestFile : TestFile {
 
     SyncTestFile(std::shared_ptr<realm::app::App> app = nullptr, std::string name = "",
                  std::string user_name = "test");
-    SyncTestFile(std::shared_ptr<realm::SyncUser> user, realm::bson::Bson partition, realm::Schema schema);
+    SyncTestFile(std::shared_ptr<realm::SyncUser> user, realm::bson::Bson partition,
+                 realm::util::Optional<realm::Schema> schema = realm::util::none);
     SyncTestFile(std::shared_ptr<realm::app::App> app, realm::bson::Bson partition, realm::Schema schema);
     SyncTestFile(std::shared_ptr<realm::SyncUser> user, realm::Schema schema, realm::SyncConfig::FLXSyncEnabled);
 };
@@ -209,6 +210,10 @@ struct TestSyncManager {
     SyncServer& sync_server()
     {
         return m_sync_server;
+    }
+    const std::string& base_file_path() const
+    {
+        return m_base_file_path;
     }
 
     // Capture the token refresh callback so that we can invoke it later with
@@ -257,7 +262,6 @@ inline TestSyncManager::Config::Config(std::string app_id, std::string bp, realm
 inline TestSyncManager::Config::Config(const realm::app::App::Config& app_cfg, realm::AppSession* session)
     : app_config(app_cfg)
     , metadata_mode(realm::SyncManager::MetadataMode::NoEncryption)
-    , should_teardown_test_directory(true)
     , app_session(session)
 {
 }

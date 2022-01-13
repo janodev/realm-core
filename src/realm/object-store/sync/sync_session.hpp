@@ -137,6 +137,18 @@ public:
     void wait_for_download_completion(util::UniqueFunction<void(std::error_code)>&& callback)
         REQUIRES(!m_state_mutex);
 
+    // Block until upload completion occurs. Prefer the async version of this
+    // which takes a callback outside of test code.
+    // Returns true if upload completion actually occurred, and false if the
+    // session does not exist or the client was stopped.
+    bool wait_for_upload_completion();
+
+    // Block until download completion occurs. Prefer the async version of this
+    // which takes a callback outside of test code.
+    // Returns true if download completion actually occurred, and false if the
+    // session does not exist or the client was stopped.
+    bool wait_for_download_completion();
+
     // Register a notifier that updates the app regarding progress.
     //
     // If `m_current_progress` is populated when this method is called, the notifier
@@ -181,7 +193,7 @@ public:
     void handle_reconnect() REQUIRES(!m_state_mutex);
 
     // Inform the sync session that it should close.
-    void close() REQUIRES(!m_state_mutex, !m_config_mutex);
+    void close(bool force = false) REQUIRES(!m_state_mutex, !m_config_mutex);
 
     // Inform the sync session that it should log out.
     void log_out() REQUIRES(!m_state_mutex);
@@ -355,13 +367,14 @@ private:
     void assert_mutex_unlocked() ASSERT_CAPABILITY(!m_state_mutex) ASSERT_CAPABILITY(!m_config_mutex) {}
 
     mutable util::CheckedMutex m_state_mutex;
+    mutable util::CheckedMutex m_connection_state_mutex;
 
     State m_state GUARDED_BY(m_state_mutex) = State::Inactive;
 
     // The underlying state of the connection. Even when sharing connections, the underlying session
     // will always start out as disconnected and then immediately transition to the correct state when calling
     // bind().
-    ConnectionState m_connection_state GUARDED_BY(m_state_mutex) = ConnectionState::Disconnected;
+    ConnectionState m_connection_state GUARDED_BY(m_connection_state_mutex) = ConnectionState::Disconnected;
     size_t m_death_count GUARDED_BY(m_state_mutex) = 0;
 
     mutable util::CheckedMutex m_config_mutex;

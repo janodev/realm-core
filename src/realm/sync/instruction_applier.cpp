@@ -891,7 +891,7 @@ void InstructionApplier::operator()(const Instruction::SetInsert& instr)
                         bad_transaction_log("SetInsert: NULL in non-nullable set '%2.%1'", field_name, table_name);
                     }
 
-                    if (data_type == type_Mixed || value.get_type() == data_type) {
+                    if (data_type == type_Mixed || value.is_null() || value.get_type() == data_type) {
                         set.insert_any(value);
                     }
                     else {

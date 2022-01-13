@@ -138,7 +138,7 @@ SyncTestFile::SyncTestFile(std::shared_ptr<app::App> app, std::string name, std:
     schema_mode = SchemaMode::AdditiveExplicit;
 }
 
-SyncTestFile::SyncTestFile(std::shared_ptr<realm::SyncUser> user, bson::Bson partition, realm::Schema _schema)
+SyncTestFile::SyncTestFile(std::shared_ptr<SyncUser> user, bson::Bson partition, util::Optional<Schema> schema)
 {
     if (!user)
         throw std::runtime_error("Must provide `user` for SyncTestFile");
@@ -152,7 +152,7 @@ SyncTestFile::SyncTestFile(std::shared_ptr<realm::SyncUser> user, bson::Bson par
         abort();
     };
     schema_version = 1;
-    schema = _schema;
+    this->schema = std::move(schema);
     schema_mode = SchemaMode::AdditiveExplicit;
 }
 
