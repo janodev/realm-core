@@ -98,6 +98,21 @@ Results::Mode Results::get_mode() const noexcept
     return m_mode;
 }
 
+Obj ResultsSection::operator[](size_t idx) const
+{
+    return m_parent->m_results.get(m_range.first + idx);
+}
+
+SectionedResults Results::sectioned_results(StringData property,
+                                            bool ascending,
+                                            SectionStrategy strategy)
+{
+    const ObjectSchema& object_schema = get_object_schema();
+    const Property* prop = object_schema.property_for_name(property);
+    auto sorted = this->sort(std::vector<std::pair<std::string, bool>>({{property, ascending}}));
+    return SectionedResults(sorted.snapshot(), prop, strategy);
+}
+
 bool Results::is_valid() const
 {
     if (m_realm) {

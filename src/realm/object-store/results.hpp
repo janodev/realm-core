@@ -36,10 +36,17 @@
 
 namespace realm {
 class Mixed;
+class SectionedResults;
 
 namespace _impl {
 class ResultsNotifierBase;
 }
+
+enum class SectionStrategy {
+    First,
+    Last,
+    None
+};
 
 class Results {
 public:
@@ -60,6 +67,8 @@ public:
     Results& operator=(Results&&);
     Results(const Results&);
     Results& operator=(const Results&);
+
+    SectionedResults sectioned_results(StringData property, bool ascending, SectionStrategy strategy);
 
     // Get the Realm
     std::shared_ptr<Realm> get_realm() const
@@ -463,6 +472,158 @@ void Results::set_property_value(ContextType& ctx, StringData prop_name, ValueTy
         Object obj(m_realm, *m_object_schema, snapshot.get(i));
         obj.set_property_value_impl(ctx, *prop, value, CreatePolicy::ForceCreate, false);
     }
+}
+
+
+class ResultsSection {
+public:
+    ResultsSection() = default;
+    ResultsSection(ResultsSection&& rhs) = default;
+    ResultsSection& operator=(ResultsSection&&) = default;
+    ResultsSection(const ResultsSection&) = default;
+    ResultsSection& operator=(const ResultsSection&) = default;
+
+    ResultsSection(SectionedResults* parent, std::pair<size_t, size_t> range):
+    m_parent(parent),
+    m_range(range) { };
+
+    Obj operator[](size_t idx) const;
+
+
+    template <typename Context>
+    auto get(Context&, size_t index);
+
+    void observe() {
+
+    }
+
+    size_t size() const noexcept
+    {
+        return (m_range.second + 1) - m_range.first;
+    }
+
+private:
+    SectionedResults* m_parent;
+    std::pair<size_t, size_t> m_range;
+};
+
+
+class SectionedResults {
+public:
+
+    SectionedResults() = default;
+
+    SectionedResults(Results results, const Property* property, SectionStrategy strategy):
+    m_results(results),
+    m_property(property),
+    m_strategy(strategy) {
+        setup();
+    };
+
+
+    ResultsSection operator[](size_t idx) {
+        return ResultsSection(this, m_offset_ranges[idx]);
+    }
+
+    void setup() {
+        m_offset_ranges = std::vector<std::pair<size_t, size_t>>();
+        const size_t size = m_results.size();
+        auto indicies = std::vector<size_t>();
+        for (size_t i = 0; i < size; ++i) {
+            if (i + 1 == size) {
+                m_offset_ranges.back().second = i;
+                break;
+            }
+
+            if (i == 0) {
+                m_offset_ranges.push_back(std::pair(0, 0));
+            }
+
+            // expensive?
+            Mixed value = m_results.get(i).get_any(m_property->column_key);
+            Mixed value2 = m_results.get(i+1).get_any(m_property->column_key);
+
+            switch (m_strategy) {
+                case SectionStrategy::First:
+                    // FIXME: Check string size before hand
+                    REALM_ASSERT(m_property->type == PropertyType::String);
+                    if (value.get_string().prefix(1) != value2.get_string().prefix(1)) {
+                        m_offset_ranges.back().second = i;
+                        m_offset_ranges.push_back(std::pair(i + 1, 0));
+                    }
+                    break;
+                case SectionStrategy::Last:
+                    REALM_ASSERT(m_property->type == PropertyType::String);
+                    if (value.get_string().suffix(1) != value2.get_string().suffix(1)) {
+                        m_offset_ranges.back().second = i;
+                        m_offset_ranges.push_back(std::pair(i + 1, 0));
+                    }
+                    break;
+                default:
+                    if (value != value2) {
+                        m_offset_ranges.back().second = i;
+                        m_offset_ranges.push_back(std::pair(i + 1, 0));
+                    }
+                    break;
+            }
+        }
+    }
+
+    void observe() {
+
+    }
+
+    size_t size() const noexcept
+    {
+        return m_offset_ranges.size();
+    }
+
+    struct Iterator {
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = ResultsSection;
+        using pointer           = value_type*;
+        using reference         = value_type&;
+
+        Iterator(pointer ptr) : m_ptr(ptr) {}
+
+        reference operator*() const { return *m_ptr; }
+        pointer operator->() { return m_ptr; }
+
+        // Prefix increment
+        Iterator& operator++() { m_ptr++; return *this; }
+
+        // Postfix increment
+        Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
+
+        friend bool operator== (const Iterator& a, const Iterator& b) { return a.m_ptr == b.m_ptr; };
+        friend bool operator!= (const Iterator& a, const Iterator& b) { return a.m_ptr != b.m_ptr; };
+
+    private:
+
+        pointer m_ptr;
+    };
+
+//    Iterator begin() {
+//        return Iterator(ResultsSection(shared_from_this(), m_offset_ranges.begin()));
+//    }
+//    Iterator end()   {
+//        return Iterator(&m_data[200]);
+//    }
+
+private:
+    friend class realm::ResultsSection;
+    Results m_results;
+    const Property* m_property;
+    std::vector<std::pair<size_t, size_t>> m_offset_ranges;
+    SectionStrategy m_strategy;
+
+};
+
+template <typename Context>
+auto ResultsSection::get(Context& ctx, size_t row_ndx)
+{
+    return this->m_parent->m_results.get(ctx, m_range.first + row_ndx);
 }
 
 } // namespace realm
