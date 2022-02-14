@@ -115,7 +115,7 @@ static std::string HMAC_SHA256(std::string_view key, std::string_view data)
 #endif
 }
 
-std::string create_jwt(const std::string appId)
+static std::string create_jwt(const std::string& appId)
 {
     nlohmann::json header = {{"alg", "HS256"}, {"typ", "JWT"}};
     nlohmann::json payload = {{"aud", appId}, {"sub", "someUserId"}, {"exp", 1661896476}};
@@ -3169,7 +3169,7 @@ public:
     }
 };
 
-App::Config get_config()
+static App::Config get_config()
 {
     return get_config(instance_of<UnitTestTransport>);
 }

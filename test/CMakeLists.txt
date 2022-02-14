@@ -210,8 +210,10 @@ if(REALM_ENABLE_SYNC)
         util/benchmark_results.hpp
         util/check_logic_error.hpp
         util/check_system_error.hpp
+        util/compare_groups.hpp
         util/crypt_key.hpp
         util/demangle.hpp
+        util/dump_changesets.hpp
         util/misc.hpp
         util/mock_metrics.hpp
         util/number_names.hpp

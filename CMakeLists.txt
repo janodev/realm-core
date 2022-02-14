@@ -77,7 +77,7 @@ if(MSVC)
     # to atomic<shared_ptr<T>> because NotificationToken relies on movability.
     add_compile_options(/D_SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING)
 else()
-    add_compile_options(-Wall -Wextra -Wempty-body -Wparentheses -Wunknown-pragmas -Wunreachable-code -Wunused-parameter -Wno-missing-field-initializers)
+    add_compile_options(-Wall -Wextra -Wempty-body -Wparentheses -Wunknown-pragmas -Wunreachable-code -Wunused-parameter -Wno-missing-field-initializers -Wmissing-prototypes)
     # TODO: Remove this when fixed
     if(ANDROID)
         add_compile_options(-Wno-uninitialized)
