@@ -27,6 +27,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+#include <set>
+#include <map>
 
 namespace realm {
 namespace _impl {
@@ -120,6 +122,17 @@ public:
         : m_impl(make_impl(std::move(cb)))
     {
     }
+
+    template<typename Callback, typename SectionedResults,
+             typename = decltype(std::declval<Callback>()(std::map<size_t, std::set<size_t>>(), std::exception_ptr()))>
+    CollectionChangeCallback(Callback cb, SectionedResults& sectioned_results)
+        : m_impl(make_impl_sr(std::move(cb), sectioned_results))
+    {
+    }
+
+
+
+
     template <typename Callback>
     CollectionChangeCallback& operator=(Callback cb)
     {
@@ -152,6 +165,11 @@ public:
         return !!m_impl;
     }
 
+//    void after(std::map<size_t, std::set<size_t>> const& c)
+//    {
+//        //m_impl->after(c);
+//    }
+
 private:
     struct Base {
         virtual ~Base() {}
@@ -179,6 +197,13 @@ private:
     std::shared_ptr<Base> make_impl(Callback* cb)
     {
         return std::make_shared<Impl3<Callback>>(cb);
+    }
+
+    template<typename Callback, typename SectionedResults,
+             typename = decltype(std::declval<Callback>()(std::map<size_t, std::set<size_t>>(), std::exception_ptr()))>
+    std::shared_ptr<Base> make_impl_sr(Callback cb, SectionedResults& sectioned_results)
+    {
+        return std::make_shared<SectionedResultsImpl<Callback, SectionedResults>>(std::move(cb), sectioned_results);
     }
 
     template <typename T>
@@ -239,8 +264,47 @@ private:
         }
     };
 
+    template <typename T, typename SectionedResults>
+    struct SectionedResultsImpl : public Base {
+        T impl;
+        SectionedResults& m_sectioned_results;
+        SectionedResultsImpl(T impl, SectionedResults& sectioned_results)
+            : impl(std::move(impl)), m_sectioned_results(sectioned_results)
+        {
+        }
+//        void before(CollectionChangeSet const&) override {}
+//        void after(CollectionChangeSet const& change) override
+//        {
+//            impl(change, {});
+//        }
+//        void error(std::exception_ptr error) override
+//        {
+//            impl({}, error);
+//        }
+
+        void before(CollectionChangeSet const& c) override
+        {
+        }
+        void after(CollectionChangeSet const& c) override
+        {
+            m_sectioned_results.calculate_sections();
+            std::map<size_t, std::set<size_t>> modified_sections = std::map<size_t, std::set<size_t>>();
+            for (auto i : c.insertions.as_indexes()) {
+                auto range = m_sectioned_results.section_for_index(i);
+                modified_sections[range.index].insert(i - range.begin);
+            }
+//            impl.after(modified_sections);
+            impl(modified_sections, {});
+        }
+        void error(std::exception_ptr error) override
+        {
+        }
+    };
+
     std::shared_ptr<Base> m_impl;
 };
+
+
 } // namespace realm
 
 #endif // REALM_COLLECTION_NOTIFICATIONS_HPP

@@ -34,6 +34,8 @@
 #include <realm/util/checked_mutex.hpp>
 #include <realm/util/optional.hpp>
 
+#include <iostream>
+
 namespace realm {
 class Mixed;
 class SectionedResults;
@@ -474,6 +476,12 @@ void Results::set_property_value(ContextType& ctx, StringData prop_name, ValueTy
     }
 }
 
+struct SectionRange {
+    size_t index;
+    size_t begin;
+    size_t end;
+};
+
 
 class ResultsSection {
 public:
@@ -483,7 +491,7 @@ public:
     ResultsSection(const ResultsSection&) = default;
     ResultsSection& operator=(const ResultsSection&) = default;
 
-    ResultsSection(SectionedResults* parent, std::pair<size_t, size_t> range):
+    ResultsSection(SectionedResults* parent, SectionRange range):
     m_parent(parent),
     m_range(range) { };
 
@@ -493,31 +501,28 @@ public:
     template <typename Context>
     auto get(Context&, size_t index);
 
-    void observe() {
-
-    }
-
-    size_t size() const noexcept
+    size_t size() noexcept
     {
-        return (m_range.second + 1) - m_range.first;
+        return (m_range.end + 1) - m_range.begin;
     }
 
 private:
+
     SectionedResults* m_parent;
-    std::pair<size_t, size_t> m_range;
+    // FIXME: This will be out of date if underlying results changes.
+    SectionRange m_range;
 };
 
 
 class SectionedResults {
 public:
-
     SectionedResults() = default;
 
     SectionedResults(Results results, const Property* property, SectionStrategy strategy):
     m_results(results),
     m_property(property),
     m_strategy(strategy) {
-        setup();
+        calculate_sections();
     };
 
 
@@ -525,18 +530,24 @@ public:
         return ResultsSection(this, m_offset_ranges[idx]);
     }
 
-    void setup() {
-        m_offset_ranges = std::vector<std::pair<size_t, size_t>>();
+    NotificationToken add_notification_callback(CollectionChangeCallback callback,
+                                                KeyPathArray key_path_array = {}) &;
+
+    SectionRange section_for_index(size_t index) {
+        auto is_match = [index](SectionRange& section){ return index >= section.begin && index <= section.end; };
+        auto result = std::find_if(m_offset_ranges.begin(), m_offset_ranges.end(), is_match);
+        return *result;
+    }
+
+    void calculate_sections() {
+        m_offset_ranges = {};
         const size_t size = m_results.size();
         auto indicies = std::vector<size_t>();
+        size_t current_section = 0;
         for (size_t i = 0; i < size; ++i) {
             if (i + 1 == size) {
-                m_offset_ranges.back().second = i;
+                m_offset_ranges.back().end = i;
                 break;
-            }
-
-            if (i == 0) {
-                m_offset_ranges.push_back(std::pair(0, 0));
             }
 
             // expensive?
@@ -547,34 +558,39 @@ public:
                 case SectionStrategy::First:
                     // FIXME: Check string size before hand
                     REALM_ASSERT(m_property->type == PropertyType::String);
+                    if (i == 0) {
+                        m_offset_ranges.push_back({current_section, 0, 0});
+                        current_section++;
+                    }
+                    m_offset_ranges.back().end = i;
+
+                    std::cout << "value:: " << value.get_string() << "\n";
                     if (value.get_string().prefix(1) != value2.get_string().prefix(1)) {
-                        m_offset_ranges.back().second = i;
-                        m_offset_ranges.push_back(std::pair(i + 1, 0));
+                        m_offset_ranges.push_back({current_section, i + 1, 0});
+                        current_section++;
                     }
                     break;
                 case SectionStrategy::Last:
                     REALM_ASSERT(m_property->type == PropertyType::String);
                     if (value.get_string().suffix(1) != value2.get_string().suffix(1)) {
-                        m_offset_ranges.back().second = i;
-                        m_offset_ranges.push_back(std::pair(i + 1, 0));
+                        m_offset_ranges.push_back({current_section, i + 1, 0});
+                        current_section++;
                     }
                     break;
                 default:
                     if (value != value2) {
-                        m_offset_ranges.back().second = i;
-                        m_offset_ranges.push_back(std::pair(i + 1, 0));
+                        m_offset_ranges.push_back({current_section, i + 1, 0});
+                        current_section++;
                     }
                     break;
             }
         }
     }
 
-    void observe() {
-
-    }
-
-    size_t size() const noexcept
+    size_t size() noexcept
     {
+        // FIXME: Only run when underlying results have changed.
+        calculate_sections();
         return m_offset_ranges.size();
     }
 
@@ -615,7 +631,7 @@ private:
     friend class realm::ResultsSection;
     Results m_results;
     const Property* m_property;
-    std::vector<std::pair<size_t, size_t>> m_offset_ranges;
+    std::vector<SectionRange> m_offset_ranges;
     SectionStrategy m_strategy;
 
 };
@@ -623,7 +639,7 @@ private:
 template <typename Context>
 auto ResultsSection::get(Context& ctx, size_t row_ndx)
 {
-    return this->m_parent->m_results.get(ctx, m_range.first + row_ndx);
+    return this->m_parent->m_results.get(ctx, m_range.begin + row_ndx);
 }
 
 } // namespace realm
