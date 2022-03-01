@@ -54,6 +54,15 @@ private:
     uint64_t m_token;
 };
 
+struct SectionedResultsChangeSet {
+    // Sections and indices which were removed from the _old_ collection
+    std::map<size_t, std::set<size_t>> deletions;
+    // Sections and indices in the _new_ collection which are new insertions
+    std::map<size_t, std::set<size_t>> insertions;
+    // Sections and indices of objects in the _old_ collection which were modified
+    std::map<size_t, std::set<size_t>> modifications;
+};
+
 struct CollectionChangeSet {
     struct Move {
         size_t from;
@@ -124,14 +133,11 @@ public:
     }
 
     template<typename Callback, typename SectionedResults,
-             typename = decltype(std::declval<Callback>()(std::map<size_t, std::set<size_t>>(), std::exception_ptr()))>
+             typename = decltype(std::declval<Callback>()(SectionedResultsChangeSet(), std::exception_ptr()))>
     CollectionChangeCallback(Callback cb, SectionedResults& sectioned_results)
         : m_impl(make_impl_sr(std::move(cb), sectioned_results))
     {
     }
-
-
-
 
     template <typename Callback>
     CollectionChangeCallback& operator=(Callback cb)
@@ -165,11 +171,6 @@ public:
         return !!m_impl;
     }
 
-//    void after(std::map<size_t, std::set<size_t>> const& c)
-//    {
-//        //m_impl->after(c);
-//    }
-
 private:
     struct Base {
         virtual ~Base() {}
@@ -200,7 +201,7 @@ private:
     }
 
     template<typename Callback, typename SectionedResults,
-             typename = decltype(std::declval<Callback>()(std::map<size_t, std::set<size_t>>(), std::exception_ptr()))>
+             typename = decltype(std::declval<Callback>()(SectionedResultsChangeSet(), std::exception_ptr()))>
     std::shared_ptr<Base> make_impl_sr(Callback cb, SectionedResults& sectioned_results)
     {
         return std::make_shared<SectionedResultsImpl<Callback, SectionedResults>>(std::move(cb), sectioned_results);
@@ -272,15 +273,6 @@ private:
             : impl(std::move(impl)), m_sectioned_results(sectioned_results)
         {
         }
-//        void before(CollectionChangeSet const&) override {}
-//        void after(CollectionChangeSet const& change) override
-//        {
-//            impl(change, {});
-//        }
-//        void error(std::exception_ptr error) override
-//        {
-//            impl({}, error);
-//        }
 
         void before(CollectionChangeSet const& c) override
         {
@@ -288,16 +280,22 @@ private:
         void after(CollectionChangeSet const& c) override
         {
             m_sectioned_results.calculate_sections();
-            std::map<size_t, std::set<size_t>> modified_sections = std::map<size_t, std::set<size_t>>();
-            for (auto i : c.insertions.as_indexes()) {
-                auto range = m_sectioned_results.section_for_index(i);
-                modified_sections[range.index].insert(i - range.begin);
-            }
-//            impl.after(modified_sections);
-            impl(modified_sections, {});
+            std::map<size_t, std::set<size_t>> insertions = convert_indicies(c.insertions.as_indexes());
+            std::map<size_t, std::set<size_t>> modifications = convert_indicies(c.modifications.as_indexes());
+            std::map<size_t, std::set<size_t>> deletions = convert_indicies(c.deletions.as_indexes());
+            impl(SectionedResultsChangeSet { insertions, modifications, deletions }, {});
         }
         void error(std::exception_ptr error) override
         {
+        }
+
+        std::map<size_t, std::set<size_t>> convert_indicies(IndexSet::IndexIteratableAdaptor indicies) {
+            std::map<size_t, std::set<size_t>> modified_sections = std::map<size_t, std::set<size_t>>();
+            for (auto i : indicies) {
+                auto range = m_sectioned_results.section_for_index(i);
+                modified_sections[range.index].insert(i - range.begin);
+            }
+            return modified_sections;
         }
     };
 

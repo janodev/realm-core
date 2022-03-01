@@ -70,7 +70,10 @@ public:
     Results(const Results&);
     Results& operator=(const Results&);
 
-    SectionedResults sectioned_results(StringData property, bool ascending, SectionStrategy strategy);
+//    SectionedResults sectioned_results(StringData property, bool ascending, SectionStrategy strategy);
+    SectionedResults sectioned_results(StringData property, bool ascending, util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func);
+
+
 
     // Get the Realm
     std::shared_ptr<Realm> get_realm() const
@@ -491,26 +494,20 @@ public:
     ResultsSection(const ResultsSection&) = default;
     ResultsSection& operator=(const ResultsSection&) = default;
 
-    ResultsSection(SectionedResults* parent, SectionRange range):
+    ResultsSection(SectionedResults* parent, size_t index):
     m_parent(parent),
-    m_range(range) { };
+    m_index(index) { };
 
     Obj operator[](size_t idx) const;
-
 
     template <typename Context>
     auto get(Context&, size_t index);
 
-    size_t size() noexcept
-    {
-        return (m_range.end + 1) - m_range.begin;
-    }
+    size_t size();
 
 private:
-
     SectionedResults* m_parent;
-    // FIXME: This will be out of date if underlying results changes.
-    SectionRange m_range;
+    size_t m_index;
 };
 
 
@@ -525,9 +522,15 @@ public:
         calculate_sections();
     };
 
+    SectionedResults(Results results, const Property* property, util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func):
+    m_results(results),
+    m_property(property),
+    m_callback(std::move(comparison_func)) {
+        calculate_sections();
+    };
 
     ResultsSection operator[](size_t idx) {
-        return ResultsSection(this, m_offset_ranges[idx]);
+        return ResultsSection(this, idx);
     }
 
     NotificationToken add_notification_callback(CollectionChangeCallback callback,
@@ -549,46 +552,22 @@ public:
                 m_offset_ranges.back().end = i;
                 break;
             }
+            if (i == 0) {
+                m_offset_ranges.push_back({current_section, 0, 0});
+                current_section++;
+            }
+            m_offset_ranges.back().end = i;
 
-            // expensive?
-            Mixed value = m_results.get(i).get_any(m_property->column_key);
-            Mixed value2 = m_results.get(i+1).get_any(m_property->column_key);
-
-            switch (m_strategy) {
-                case SectionStrategy::First:
-                    // FIXME: Check string size before hand
-                    REALM_ASSERT(m_property->type == PropertyType::String);
-                    if (i == 0) {
-                        m_offset_ranges.push_back({current_section, 0, 0});
-                        current_section++;
-                    }
-                    m_offset_ranges.back().end = i;
-
-                    std::cout << "value:: " << value.get_string() << "\n";
-                    if (value.get_string().prefix(1) != value2.get_string().prefix(1)) {
-                        m_offset_ranges.push_back({current_section, i + 1, 0});
-                        current_section++;
-                    }
-                    break;
-                case SectionStrategy::Last:
-                    REALM_ASSERT(m_property->type == PropertyType::String);
-                    if (value.get_string().suffix(1) != value2.get_string().suffix(1)) {
-                        m_offset_ranges.push_back({current_section, i + 1, 0});
-                        current_section++;
-                    }
-                    break;
-                default:
-                    if (value != value2) {
-                        m_offset_ranges.push_back({current_section, i + 1, 0});
-                        current_section++;
-                    }
-                    break;
+            if (!m_callback(m_results.get_any(i), m_results.get_any(i + 1))) {
+                m_offset_ranges.push_back({current_section, i + 1, 0});
+                current_section++;
             }
         }
     }
 
     size_t size() noexcept
     {
+        // update_if_needed, ensure_up_to_date
         // FIXME: Only run when underlying results have changed.
         calculate_sections();
         return m_offset_ranges.size();
@@ -634,12 +613,14 @@ private:
     std::vector<SectionRange> m_offset_ranges;
     SectionStrategy m_strategy;
 
+
+    util::UniqueFunction<bool(Mixed first, Mixed second)> m_callback;
 };
 
 template <typename Context>
 auto ResultsSection::get(Context& ctx, size_t row_ndx)
 {
-    return this->m_parent->m_results.get(ctx, m_range.begin + row_ndx);
+    return this->m_parent->m_results.get(ctx, m_parent->m_offset_ranges[m_index].begin + row_ndx);
 }
 
 } // namespace realm

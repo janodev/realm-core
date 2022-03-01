@@ -100,24 +100,26 @@ Results::Mode Results::get_mode() const noexcept
 
 Obj ResultsSection::operator[](size_t idx) const
 {
-    return m_parent->m_results.get(m_range.begin + idx);
+    return m_parent->m_results.get(m_parent->m_offset_ranges[m_index].begin + idx);
 }
 
-SectionedResults Results::sectioned_results(StringData property,
-                                            bool ascending,
-                                            SectionStrategy strategy)
+size_t ResultsSection::size()
+{
+    auto range = m_parent->m_offset_ranges[m_index];
+    return (range.end + 1) - range.begin;
+}
+
+SectionedResults Results::sectioned_results(StringData property, bool ascending, util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func)
 {
     const ObjectSchema& object_schema = get_object_schema();
     const Property* prop = object_schema.property_for_name(property);
     auto sorted = this->sort(std::vector<std::pair<std::string, bool>>({{property, ascending}}));
-    return SectionedResults(sorted, prop, strategy);
+    return SectionedResults(sorted, prop, std::move(comparison_func));
 }
 
 NotificationToken SectionedResults::add_notification_callback(CollectionChangeCallback callback, KeyPathArray key_path_array) &
 {
     return m_results.add_notification_callback(std::move(callback), key_path_array);
-//    prepare_async(ForCallback{true});
-//    return {m_notifier, m_notifier->add_callback(std::move(callback), std::move(key_path_array))};
 }
 
 bool Results::is_valid() const
