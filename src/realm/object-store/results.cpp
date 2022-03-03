@@ -24,6 +24,7 @@
 #include <realm/object-store/object_schema.hpp>
 #include <realm/object-store/object_store.hpp>
 #include <realm/object-store/schema.hpp>
+#include <realm/object-store/sectioned_results.hpp>
 
 #include <realm/set.hpp>
 
@@ -96,30 +97,6 @@ Results::Mode Results::get_mode() const noexcept
 {
     util::CheckedUniqueLock lock(m_mutex);
     return m_mode;
-}
-
-Obj ResultsSection::operator[](size_t idx) const
-{
-    return m_parent->m_results.get(m_parent->m_offset_ranges[m_index].begin + idx);
-}
-
-size_t ResultsSection::size()
-{
-    auto range = m_parent->m_offset_ranges[m_index];
-    return (range.end + 1) - range.begin;
-}
-
-SectionedResults Results::sectioned_results(StringData property, bool ascending, util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func)
-{
-    const ObjectSchema& object_schema = get_object_schema();
-    const Property* prop = object_schema.property_for_name(property);
-    auto sorted = this->sort(std::vector<std::pair<std::string, bool>>({{property, ascending}}));
-    return SectionedResults(sorted, prop, std::move(comparison_func));
-}
-
-NotificationToken SectionedResults::add_notification_callback(CollectionChangeCallback callback, KeyPathArray key_path_array) &
-{
-    return m_results.add_notification_callback(std::move(callback), key_path_array);
 }
 
 bool Results::is_valid() const
@@ -203,32 +180,31 @@ StringData Results::get_object_type() const noexcept
     return ObjectStore::object_type_for_table_name(m_table->get_name());
 }
 
-void Results::ensure_up_to_date(EvaluateMode mode)
+bool Results::ensure_up_to_date(EvaluateMode mode)
 {
     if (m_update_policy == UpdatePolicy::Never) {
         REALM_ASSERT(m_mode == Mode::TableView);
-        return;
+        return true;
     }
 
     switch (m_mode) {
         case Mode::Empty:
-            return;
+            return true;
         case Mode::Table:
             // Tables are always up-to-date
-            return;
+            return true;
         case Mode::Collection: {
             // Collections themselves are always up-to-date, but we may need
             // to apply sort descriptors
             if (m_descriptor_ordering.is_empty())
-                return;
+                return true;
 
             // Collections of objects are sorted/distincted by converting them
             // to a TableView
             if (do_get_type() == PropertyType::Object) {
                 m_query = do_get_query();
                 m_mode = Mode::Query;
-                ensure_up_to_date(mode);
-                return;
+                return ensure_up_to_date(mode);
             }
 
             // Other types we do manually via m_list_indices. Ideally we just
@@ -236,7 +212,7 @@ void Results::ensure_up_to_date(EvaluateMode mode)
             // run yet or if we're currently in a write transaction (as we can't
             // know if any relevant changes have happened so far in the write).
             if (m_notifier && m_notifier->get_list_indices(m_list_indices) && !m_realm->is_in_transaction())
-                return;
+                return true;
 
             bool needs_update = m_collection->has_changed();
             if (!m_list_indices) {
@@ -244,10 +220,10 @@ void Results::ensure_up_to_date(EvaluateMode mode)
                 needs_update = true;
             }
             if (!needs_update)
-                return;
+                return false;
             if (m_collection->is_empty()) {
                 m_list_indices->clear();
-                return;
+                return true;
             }
 
             // Note that for objects this would be wrong as .sort().distinct()
@@ -270,7 +246,7 @@ void Results::ensure_up_to_date(EvaluateMode mode)
                 m_collection->distinct(*m_list_indices, sort_order);
             else if (sort_order)
                 m_collection->sort(*m_list_indices, *sort_order);
-            return;
+            return true;
         }
 
         case Mode::Query:
@@ -278,14 +254,15 @@ void Results::ensure_up_to_date(EvaluateMode mode)
             // getting a TableView, and size() does as well if distinct is involved.
             if (mode == EvaluateMode::Count && !m_descriptor_ordering.will_apply_distinct()) {
                 m_query.sync_view_if_needed();
-                return;
+                // FIXME: can we compare table versions from sync_view_if_needed?
+                return false;
             }
 
             // First we check if we ran the Query in the background and can
             // just use that
             if (m_notifier && m_notifier->get_tableview(m_table_view)) {
                 m_mode = Mode::TableView;
-                return;
+                return false;
             }
 
             // We have to actually run the Query locally. We have an option
@@ -301,7 +278,7 @@ void Results::ensure_up_to_date(EvaluateMode mode)
             // rerun this query in the background.
             if (mode != EvaluateMode::Snapshot && !m_notifier)
                 prepare_async(ForCallback{false});
-            return;
+            return false;
 
         case Mode::TableView:
             // Unless we're creating a snapshot, create an async notifier that'll
@@ -318,7 +295,7 @@ void Results::ensure_up_to_date(EvaluateMode mode)
                 m_table_view.sync_if_needed();
             if (auto audit = m_realm->audit_context())
                 audit->record_query(m_realm->read_transaction_version(), m_table_view);
-            return;
+            return false;
     }
 }
 
@@ -1168,6 +1145,14 @@ Results Results::distinct(std::vector<std::string> const& keypaths) const
     for (auto& keypath : keypaths)
         column_keys.push_back(parse_keypath(keypath, m_realm->schema(), &get_object_schema()));
     return distinct({std::move(column_keys)});
+}
+
+SectionedResults Results::sectioned_results(const std::string& key_path,
+                                            bool ascending,
+                                            util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func)
+{
+    auto sorted = this->sort(std::vector<std::pair<std::string, bool>>({{key_path, ascending}}));
+    return SectionedResults(sorted, std::move(comparison_func));
 }
 
 Results Results::snapshot() const&

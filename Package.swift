@@ -459,6 +459,7 @@ let headers: [String] = [
     "realm/object-store/property.hpp",
     "realm/object-store/results.hpp",
     "realm/object-store/schema.hpp",
+    "realm/object-store/sectioned_results.hpp",
     "realm/object-store/set.hpp",
     "realm/object-store/shared_realm.hpp",
     "realm/object-store/sync/app.hpp",

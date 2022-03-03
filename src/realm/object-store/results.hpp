@@ -44,12 +44,6 @@ namespace _impl {
 class ResultsNotifierBase;
 }
 
-enum class SectionStrategy {
-    First,
-    Last,
-    None
-};
-
 class Results {
 public:
     // Results can be either be backed by nothing, a thin wrapper around a table,
@@ -70,10 +64,9 @@ public:
     Results(const Results&);
     Results& operator=(const Results&);
 
-//    SectionedResults sectioned_results(StringData property, bool ascending, SectionStrategy strategy);
-    SectionedResults sectioned_results(StringData property, bool ascending, util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func);
-
-
+    SectionedResults sectioned_results(const std::string& key_path,
+                                       bool ascending,
+                                       util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func);
 
     // Get the Realm
     std::shared_ptr<Realm> get_realm() const
@@ -385,7 +378,8 @@ private:
     auto dispatch(Fn&&) const REQUIRES(!m_mutex);
 
     enum class EvaluateMode { Count, Snapshot, Normal };
-    void ensure_up_to_date(EvaluateMode mode = EvaluateMode::Normal) REQUIRES(m_mutex);
+    bool ensure_up_to_date(EvaluateMode mode = EvaluateMode::Normal) REQUIRES(m_mutex);
+    friend class realm::SectionedResults;
 
     // Shared logic between freezing and thawing Results as the Core API is the same.
     Results import_copy_into_realm(std::shared_ptr<Realm> const& realm) REQUIRES(!m_mutex);
@@ -477,150 +471,6 @@ void Results::set_property_value(ContextType& ctx, StringData prop_name, ValueTy
         Object obj(m_realm, *m_object_schema, snapshot.get(i));
         obj.set_property_value_impl(ctx, *prop, value, CreatePolicy::ForceCreate, false);
     }
-}
-
-struct SectionRange {
-    size_t index;
-    size_t begin;
-    size_t end;
-};
-
-
-class ResultsSection {
-public:
-    ResultsSection() = default;
-    ResultsSection(ResultsSection&& rhs) = default;
-    ResultsSection& operator=(ResultsSection&&) = default;
-    ResultsSection(const ResultsSection&) = default;
-    ResultsSection& operator=(const ResultsSection&) = default;
-
-    ResultsSection(SectionedResults* parent, size_t index):
-    m_parent(parent),
-    m_index(index) { };
-
-    Obj operator[](size_t idx) const;
-
-    template <typename Context>
-    auto get(Context&, size_t index);
-
-    size_t size();
-
-private:
-    SectionedResults* m_parent;
-    size_t m_index;
-};
-
-
-class SectionedResults {
-public:
-    SectionedResults() = default;
-
-    SectionedResults(Results results, const Property* property, SectionStrategy strategy):
-    m_results(results),
-    m_property(property),
-    m_strategy(strategy) {
-        calculate_sections();
-    };
-
-    SectionedResults(Results results, const Property* property, util::UniqueFunction<bool(Mixed first, Mixed second)> comparison_func):
-    m_results(results),
-    m_property(property),
-    m_callback(std::move(comparison_func)) {
-        calculate_sections();
-    };
-
-    ResultsSection operator[](size_t idx) {
-        return ResultsSection(this, idx);
-    }
-
-    NotificationToken add_notification_callback(CollectionChangeCallback callback,
-                                                KeyPathArray key_path_array = {}) &;
-
-    SectionRange section_for_index(size_t index) {
-        auto is_match = [index](SectionRange& section){ return index >= section.begin && index <= section.end; };
-        auto result = std::find_if(m_offset_ranges.begin(), m_offset_ranges.end(), is_match);
-        return *result;
-    }
-
-    void calculate_sections() {
-        m_offset_ranges = {};
-        const size_t size = m_results.size();
-        auto indicies = std::vector<size_t>();
-        size_t current_section = 0;
-        for (size_t i = 0; i < size; ++i) {
-            if (i + 1 == size) {
-                m_offset_ranges.back().end = i;
-                break;
-            }
-            if (i == 0) {
-                m_offset_ranges.push_back({current_section, 0, 0});
-                current_section++;
-            }
-            m_offset_ranges.back().end = i;
-
-            if (!m_callback(m_results.get_any(i), m_results.get_any(i + 1))) {
-                m_offset_ranges.push_back({current_section, i + 1, 0});
-                current_section++;
-            }
-        }
-    }
-
-    size_t size() noexcept
-    {
-        // update_if_needed, ensure_up_to_date
-        // FIXME: Only run when underlying results have changed.
-        calculate_sections();
-        return m_offset_ranges.size();
-    }
-
-    struct Iterator {
-        using iterator_category = std::forward_iterator_tag;
-        using difference_type   = std::ptrdiff_t;
-        using value_type        = ResultsSection;
-        using pointer           = value_type*;
-        using reference         = value_type&;
-
-        Iterator(pointer ptr) : m_ptr(ptr) {}
-
-        reference operator*() const { return *m_ptr; }
-        pointer operator->() { return m_ptr; }
-
-        // Prefix increment
-        Iterator& operator++() { m_ptr++; return *this; }
-
-        // Postfix increment
-        Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
-
-        friend bool operator== (const Iterator& a, const Iterator& b) { return a.m_ptr == b.m_ptr; };
-        friend bool operator!= (const Iterator& a, const Iterator& b) { return a.m_ptr != b.m_ptr; };
-
-    private:
-
-        pointer m_ptr;
-    };
-
-//    Iterator begin() {
-//        return Iterator(ResultsSection(shared_from_this(), m_offset_ranges.begin()));
-//    }
-//    Iterator end()   {
-//        return Iterator(&m_data[200]);
-//    }
-
-private:
-    friend class realm::ResultsSection;
-    Results m_results;
-    const Property* m_property;
-    std::vector<SectionRange> m_offset_ranges;
-    SectionStrategy m_strategy;
-
-
-    util::UniqueFunction<bool(Mixed first, Mixed second)> m_callback;
-};
-
-template <typename Context>
-auto ResultsSection::get(Context& ctx, size_t row_ndx)
-{
-    return this->m_parent->m_results.get(ctx, m_parent->m_offset_ranges[m_index].begin + row_ndx);
 }
 
 } // namespace realm
