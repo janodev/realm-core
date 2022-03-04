@@ -5,6 +5,7 @@
 #include <realm/sync/config.hpp>
 #include <realm/sync/noinst/client_history_impl.hpp>
 #include <realm/sync/noinst/client_impl_base.hpp>
+#include <realm/sync/noinst/pending_bootstrap_store.hpp>
 #include <realm/sync/subscriptions.hpp>
 #include <realm/util/bind_ptr.hpp>
 #include <realm/util/circular_buffer.hpp>
@@ -241,6 +242,7 @@ private:
     int64_t m_flx_active_version = 0;
     int64_t m_flx_last_seen_version = 0;
     int64_t m_flx_latest_version = 0;
+    std::unique_ptr<PendingBootstrapStore> m_flx_pending_bootstrap_store;
 
     bool m_initiated = false;
 
@@ -664,7 +666,7 @@ util::Optional<ClientReset>& SessionImpl::get_client_reset_config() noexcept
 }
 
 void SessionImpl::initiate_integrate_changesets(std::uint_fast64_t downloadable_bytes, DownloadBatchState batch_state,
-                                                const ReceivedChangesets& changesets)
+                                                int64_t query_version, const ReceivedChangesets& changesets)
 {
     try {
         bool simulate_integration_error = (m_wrapper.m_simulate_integration_error && !changesets.empty());
@@ -673,11 +675,30 @@ void SessionImpl::initiate_integrate_changesets(std::uint_fast64_t downloadable_
         }
         version_type client_version;
         if (REALM_LIKELY(!get_client().is_dry_run())) {
-            VersionInfo version_info;
-            ClientReplication& repl = access_realm(); // Throws
-            integrate_changesets(repl, m_progress, downloadable_bytes, changesets, version_info,
-                                 batch_state); // Throws
-            client_version = version_info.realm_version;
+            if (batch_state == DownloadBatchState::MoreToCome) {
+                if (!m_wrapper.m_flx_pending_bootstrap_store) {
+                    m_wrapper.m_flx_pending_bootstrap_store = std::make_unique<PendingBootstrapStore>(m_wrapper.m_db);
+                }
+                auto add_mode = (query_version == m_wrapper.m_flx_last_seen_version)
+                                    ? PendingBootstrapStore::Append
+                                    : PendingBootstrapStore::ClearFirst;
+                client_version = m_wrapper.m_flx_pending_bootstrap_store->add_changeset_batch(add_mode, changesets);
+            }
+            else {
+                VersionInfo version_info;
+                ClientReplication& repl = access_realm(); // Throws
+                if (m_wrapper.m_flx_pending_bootstrap_store) {
+                    while (m_wrapper.m_flx_pending_bootstrap_store->has_pending()) {
+                        auto pending_batch = m_wrapper.m_flx_pending_bootstrap_store->get_next();
+                        integrate_changesets(repl, m_progress, downloadable_bytes, pending_batch.changesets,
+                                             version_info, batch_state);
+                    }
+                }
+
+                integrate_changesets(repl, m_progress, downloadable_bytes, changesets, version_info,
+                                     batch_state); // Throws
+                client_version = version_info.realm_version;
+            }
         }
         else {
             // Fake it for "dry run" mode

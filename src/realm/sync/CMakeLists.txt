@@ -7,6 +7,7 @@ set(SYNC_SOURCES
     noinst/client_reset_operation.cpp
     noinst/compact_changesets.cpp
     noinst/compression.cpp
+    noinst/pending_bootstrap_store.cpp
     noinst/protocol_codec.cpp
     changeset_encoder.cpp
     changeset_parser.cpp
@@ -59,6 +60,7 @@ set(NOINST_HEADERS
     noinst/compact_changesets.hpp
     noinst/compression.hpp
     noinst/integer_codec.hpp
+    noinst/pending_bootstrap_store.hpp
     noinst/protocol_codec.hpp
     noinst/root_certs.hpp
 )

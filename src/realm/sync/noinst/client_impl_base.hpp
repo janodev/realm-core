@@ -827,7 +827,7 @@ private:
     /// This function is guaranteed to not be called before activation, and also
     /// not after initiation of deactivation.
     void initiate_integrate_changesets(std::uint_fast64_t downloadable_bytes, DownloadBatchState batch_state,
-                                       const ReceivedChangesets&);
+                                       int64_t query_version, const ReceivedChangesets&);
 
     /// See request_upload_completion_notification().
     ///
