@@ -128,6 +128,7 @@ FLXSyncTestHarness::FLXSyncTestHarness(const std::string& test_name, ServerSchem
 TestSyncManager FLXSyncTestHarness::make_sync_manager()
 {
     TestSyncManager::Config smc(m_app_config);
+    smc.verbose_sync_client_logging = true;
     return TestSyncManager(std::move(smc), {});
 }
 
@@ -670,6 +671,38 @@ TEST_CASE("flx: connect to PBS as FLX returns an error", "[sync][flx][app]") {
 
     CHECK(sync_error->error_code == make_error_code(sync::ProtocolError::switch_to_pbs));
 }
+
+TEST_CASE("flx: bootstrap batching prevents orphan documents", "[sync][flx][app]") {
+    Schema schema{
+        ObjectSchema("TopLevel",
+                     {
+                         {"_id", PropertyType::ObjectId, Property::IsPrimary{true}},
+                         {"queryable_int_field", PropertyType::Int | PropertyType::Nullable},
+                         {"list_of_strings", PropertyType::Array | PropertyType::String },
+                     }),
+    };
+
+    FLXSyncTestHarness harness("flx_bootstrap_batching", {std::move(schema), {"queryable_int_field"}});
+
+    std::vector<ObjectId> obj_ids;
+    harness.load_initial_data([&](SharedRealm realm) {
+        realm->begin_transaction();
+        CppContext c(realm);
+        for (int i = 0; i < 5; ++i) {
+            obj_ids.push_back(ObjectId::gen());
+            auto obj = Object::create(c, realm, "TopLevel",
+                           util::Any(AnyDict{{"_id", obj_ids.back()},
+                                             {"list_of_strings", AnyVector{}},
+                                             {"queryable_int_field", static_cast<int64_t>(i * 5)}}));
+            List str_list(obj, realm->schema().find("TopLevel")->property_for_name("list_of_strings"));
+            for (int j = 0; j < 1000; ++j) {
+                str_list.add(c, util::Any(std::string(1024, 'a' + (j % 26))));
+            }
+        }
+        realm->commit_transaction();
+    });
+}
+
 } // namespace realm::app
 
 #endif

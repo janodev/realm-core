@@ -53,7 +53,7 @@ PendingBootstrapStore::PendingBootstrapStore(DBRef db)
     auto changeset_table = wr->add_embedded_table(c_pending_changesets_table);
     m_changeset_table = changeset_table->get_key();
 
-    m_changesets = table->add_column(*changeset_table, c_pending_bootstrap_changesets);
+    m_changesets = table->add_column_list(*changeset_table, c_pending_bootstrap_changesets);
     m_total_size = table->add_column(type_Int, c_pending_bootstrap_total_size);
 
     m_changeset_server_version = changeset_table->add_column(type_Int, c_pending_changesets_server_version);
@@ -74,11 +74,7 @@ version_type PendingBootstrapStore::add_changeset_batch(AddMode mode,
         table->clear();
     }
 
-    bool did_create = false;
-    auto msg_obj = table->create_object_with_primary_key(Mixed{m_msg_num++}, &did_create);
-    if (!did_create) {
-        throw std::runtime_error("Duplicate bootstrap message number in pending bootstrap table");
-    }
+    auto msg_obj = table->create_object();
 
     auto changeset_list = msg_obj.get_linklist(m_changesets);
     size_t idx = 0;
