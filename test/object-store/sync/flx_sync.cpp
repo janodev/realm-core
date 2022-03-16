@@ -686,7 +686,7 @@ TEST_CASE("flx: bootstrap batching prevents orphan documents", "[sync][flx][app]
                      {
                          {"_id", PropertyType::ObjectId, Property::IsPrimary{true}},
                          {"queryable_int_field", PropertyType::Int | PropertyType::Nullable},
-                         {"list_of_strings", PropertyType::Array | PropertyType::String },
+                         {"list_of_strings", PropertyType::Array | PropertyType::String},
                      }),
     };
 
