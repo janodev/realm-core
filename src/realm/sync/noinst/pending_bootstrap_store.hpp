@@ -19,6 +19,8 @@
 #pragma once
 
 #include "realm/db.hpp"
+#include "realm/list.hpp"
+#include "realm/obj.hpp"
 #include "realm/sync/transform.hpp"
 
 namespace realm::sync {
@@ -34,8 +36,9 @@ public:
 
     struct PendingBatch {
         std::vector<Transformer::RemoteChangeset> changesets;
-        std::vector<char> owned_data;
+        std::vector<OwnedBinaryData> changeset_data;
     };
+
     PendingBatch get_next();
 
     enum AddMode {
@@ -50,7 +53,6 @@ private:
 
     TableKey m_table;
     ColKey m_changesets;
-    ColKey m_total_size;
 
     TableKey m_changeset_table;
     ColKey m_changeset_server_version;
@@ -60,7 +62,6 @@ private:
     ColKey m_changeset_data;
 
     bool m_has_pending = false;
-    int64_t m_msg_num = 0;
 };
 
 } // namespace realm::sync

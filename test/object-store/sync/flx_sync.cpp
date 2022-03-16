@@ -74,6 +74,8 @@ public:
                 subs.get_state_change_notification(sync::SubscriptionSet::State::Complete).get();
             }
             func(realm);
+            wait_for_upload(*realm);
+            wait_for_download(*realm);
         });
     }
 
@@ -82,6 +84,11 @@ public:
     const Schema& schema() const
     {
         return m_schema;
+    }
+
+    const app::App::Config& app_config() const
+    {
+        return m_app_config;
     }
 
 private:
@@ -129,6 +136,7 @@ TestSyncManager FLXSyncTestHarness::make_sync_manager()
 {
     TestSyncManager::Config smc(m_app_config);
     smc.verbose_sync_client_logging = true;
+    smc.override_sync_route = false;
     return TestSyncManager(std::move(smc), {});
 }
 
@@ -684,23 +692,130 @@ TEST_CASE("flx: bootstrap batching prevents orphan documents", "[sync][flx][app]
 
     FLXSyncTestHarness harness("flx_bootstrap_batching", {std::move(schema), {"queryable_int_field"}});
 
+    // First we need to seed the server with objects that are large and complex enough that they get broken
+    // into multiple download messages.
+    //
+    // The server will break up changesets and download messages when they contain more than 1000 instructions
+    // and are bigger than 1MB respectively.
+    //
+    // So this generates 5 objects each with 1000+ instructions that are each 1MB+ big. This should result in
+    // 5 download messages total for the bootstrap download messages.
     std::vector<ObjectId> obj_ids;
     harness.load_initial_data([&](SharedRealm realm) {
         realm->begin_transaction();
         CppContext c(realm);
         for (int i = 0; i < 5; ++i) {
-            obj_ids.push_back(ObjectId::gen());
+            auto id = ObjectId::gen();
             auto obj = Object::create(c, realm, "TopLevel",
-                           util::Any(AnyDict{{"_id", obj_ids.back()},
-                                             {"list_of_strings", AnyVector{}},
-                                             {"queryable_int_field", static_cast<int64_t>(i * 5)}}));
+                                      util::Any(AnyDict{{"_id", id},
+                                                        {"list_of_strings", AnyVector{}},
+                                                        {"queryable_int_field", static_cast<int64_t>(i * 5)}}));
             List str_list(obj, realm->schema().find("TopLevel")->property_for_name("list_of_strings"));
-            for (int j = 0; j < 1000; ++j) {
+            for (int j = 0; j < 1024; ++j) {
                 str_list.add(c, util::Any(std::string(1024, 'a' + (j % 26))));
+            }
+            if (i * 5 >= 15) {
+                obj_ids.push_back(id);
             }
         }
         realm->commit_transaction();
     });
+
+    // Now we'll start a realm with a hook after download messages are received that will interrupt the
+    // bootstrap in the middle.
+    auto path_for_interrupted_realm = util::make_temp_dir();
+    ;
+    auto cleanup = util::make_scope_exit([&]() noexcept {
+        util::try_remove_dir_recursive(path_for_interrupted_realm);
+    });
+
+    {
+        TestSyncManager::Config tsmc(harness.app_config());
+        tsmc.should_teardown_test_directory = false;
+        tsmc.verbose_sync_client_logging = true;
+        tsmc.override_sync_route = false;
+        tsmc.base_path = path_for_interrupted_realm;
+
+        TestSyncManager sync_mgr(tsmc);
+        auto creds = create_user_and_log_in(sync_mgr.app());
+        SyncTestFile config(sync_mgr.app()->current_user(), harness.schema(), SyncConfig::FLXSyncEnabled{});
+        SharedRealm realm;
+        int download_msg_counter = 0;
+        config.sync_config->on_download_integrated_hook = [&] {
+            REALM_ASSERT(realm);
+            // We interrupt on the 5th download message, which should be half-way through the bootstrap.
+            if (++download_msg_counter != 5) {
+                return;
+            }
+            realm->sync_session()->close();
+        };
+        auto hook_guard = util::make_scope_exit([&]() noexcept {
+            config.sync_config->on_download_integrated_hook = {};
+        });
+
+        realm = Realm::get_shared_realm(config);
+        {
+            auto mut_subs = realm->get_latest_subscription_set().make_mutable_copy();
+            auto table = realm->read_group().get_table("class_TopLevel");
+            mut_subs.insert_or_assign(Query(table));
+            std::move(mut_subs).commit();
+        }
+        wait_for_upload(*realm);
+        wait_for_download(*realm);
+
+        // We'll close the realm before finishing the bootstrap. Since we turned off tearing down the test
+        // directory we should be able to re-open it and continue later though.
+    }
+
+    App::clear_cached_apps();
+
+    // Now we'll open a different realm and make some changes that would leave orphan objects on the client
+    // if the bootstrap batches weren't being cached until lastInBatch were true.
+    harness.load_initial_data([&](SharedRealm realm) {
+        auto table = realm->read_group().get_table("class_TopLevel");
+        realm->refresh();
+        realm->begin_transaction();
+        Results res(realm, Query(table).less(table->get_column_key("queryable_int_field"), int64_t(15)));
+        REQUIRE(res.size() == 3);
+        res.clear();
+        realm->commit_transaction();
+    });
+
+    // Finally re-open the realm whose bootstrap we interrupted and just wait for it to finish downloading.
+    App::clear_cached_apps();
+    TestSyncManager::Config tsmc(harness.app_config());
+    tsmc.verbose_sync_client_logging = true;
+    tsmc.override_sync_route = false;
+    tsmc.base_path = path_for_interrupted_realm;
+
+    TestSyncManager sync_mgr(tsmc);
+    SyncTestFile config(sync_mgr.app()->current_user(), harness.schema(), SyncConfig::FLXSyncEnabled{});
+    int download_msg_counter = 0;
+    config.sync_config->on_download_integrated_hook = [&] {
+        ++download_msg_counter;
+    };
+
+    auto realm = Realm::get_shared_realm(config);
+    auto table = realm->read_group().get_table("class_TopLevel");
+    {
+        auto mut_subs = realm->get_latest_subscription_set().make_mutable_copy();
+        mut_subs.insert_or_assign(Query(table));
+        std::move(mut_subs).commit();
+    }
+    wait_for_upload(*realm);
+    wait_for_download(*realm);
+
+    realm->refresh();
+    // It should have taken us 5 download messages to get here.
+    REQUIRE(download_msg_counter == 5);
+
+    // We should have exactly the number of objects as ids where the queryable_int_field was >= 15, since
+    // we removed all the objects where the queryable_int_field was < 15 in the other realm above.
+    REQUIRE(table->size() == obj_ids.size());
+    for (auto& id : obj_ids) {
+        auto obj = table->get_object_with_primary_key(Mixed{id});
+        REQUIRE(obj.is_valid());
+    }
 }
 
 } // namespace realm::app

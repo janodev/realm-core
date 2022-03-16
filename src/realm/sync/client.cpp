@@ -238,6 +238,8 @@ private:
     util::UniqueFunction<ProgressHandler> m_progress_handler;
     util::UniqueFunction<ConnectionStateChangeListener> m_connection_state_change_listener;
 
+    std::function<void()> m_on_download_integrated_hook;
+
     std::shared_ptr<SubscriptionStore> m_flx_subscription_store;
     int64_t m_flx_active_version = 0;
     int64_t m_flx_last_seen_version = 0;
@@ -682,6 +684,7 @@ void SessionImpl::initiate_integrate_changesets(std::uint_fast64_t downloadable_
                 auto add_mode = (query_version == m_wrapper.m_flx_last_seen_version)
                                     ? PendingBootstrapStore::Append
                                     : PendingBootstrapStore::ClearFirst;
+                logger.debug("Caching download message until all bootstrap downloads are received");
                 client_version = m_wrapper.m_flx_pending_bootstrap_store->add_changeset_batch(add_mode, changesets);
             }
             else {
@@ -690,6 +693,7 @@ void SessionImpl::initiate_integrate_changesets(std::uint_fast64_t downloadable_
                 if (m_wrapper.m_flx_pending_bootstrap_store) {
                     while (m_wrapper.m_flx_pending_bootstrap_store->has_pending()) {
                         auto pending_batch = m_wrapper.m_flx_pending_bootstrap_store->get_next();
+                        logger.debug("Applying cached bootstrap download message");
                         integrate_changesets(repl, m_progress, downloadable_bytes, pending_batch.changesets,
                                              version_info, batch_state);
                     }
@@ -704,6 +708,11 @@ void SessionImpl::initiate_integrate_changesets(std::uint_fast64_t downloadable_
             // Fake it for "dry run" mode
             client_version = m_last_version_available + 1;
         }
+
+        if (m_wrapper.m_on_download_integrated_hook) {
+            m_wrapper.m_on_download_integrated_hook();
+        }
+
         on_changesets_integrated(client_version, m_progress.download, batch_state); // Throws
     }
     catch (const IntegrationException& e) {
@@ -784,6 +793,7 @@ SessionWrapper::SessionWrapper(ClientImpl& client, DBRef db, std::shared_ptr<Sub
     , m_signed_access_token{std::move(config.signed_user_token)}
     , m_client_reset_config{std::move(config.client_reset_config)}
     , m_proxy_config{config.proxy_config} // Throws
+    , m_on_download_integrated_hook(config.on_download_integrated_hook)
     , m_flx_subscription_store(std::move(flx_sub_store))
 {
     REALM_ASSERT(m_db);

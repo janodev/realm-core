@@ -601,7 +601,7 @@ TEST_CASE("Get Realm using Async Open", "[asyncOpen]") {
     if (!util::EventLoop::has_implementation())
         return;
 
-    TestSyncManager init_sync_manager;
+    TestSyncManager init_sync_manager({}, SyncServer::Config{true});
     SyncTestFile config(init_sync_manager.app(), "default");
     config.cache = false;
     ObjectSchema object_schema = {"object",

@@ -163,6 +163,9 @@ struct SyncConfig {
     std::function<void(const std::string&, util::UniqueFunction<void(DBRef, util::Optional<std::string>)>)>
         get_fresh_realm_for_path;
 
+    // Will be called after each download message is integrated on the sync worker thread. For testing only.
+    std::function<void()> on_download_integrated_hook;
+
     explicit SyncConfig(std::shared_ptr<SyncUser> user, bson::Bson partition);
     explicit SyncConfig(std::shared_ptr<SyncUser> user, std::string partition);
     explicit SyncConfig(std::shared_ptr<SyncUser> user, const char* partition);

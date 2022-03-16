@@ -312,6 +312,9 @@ public:
         ///
         /// This feature exists exclusively for testing purposes at this time.
         bool simulate_integration_error = false;
+
+        /// Will be called after each download message is integrated. For use in testing.
+        std::function<void()> on_download_integrated_hook;
     };
 
     /// \brief Start a new session for the specified client-side Realm.
