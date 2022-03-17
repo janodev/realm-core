@@ -117,7 +117,7 @@ using StartImmediately = realm::util::TaggedBool<class StartImmediatelyTag>;
 class SyncServer : private realm::sync::Clock {
 public:
     struct Config {
-        bool start_immediately = false;
+        bool start_immediately = true;
         std::string local_dir;
     };
 

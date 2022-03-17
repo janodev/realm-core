@@ -53,7 +53,7 @@ TEST_CASE("sync: Connection state changes", "[sync]") {
 
     TestSyncManager::Config config;
     config.base_path = base_path;
-    TestSyncManager init_sync_manager(config, {true});
+    TestSyncManager init_sync_manager(config);
     auto app = init_sync_manager.app();
     auto user =
         app->sync_manager()->get_user("user", ENCODE_FAKE_JWT("not_a_real_token"),

@@ -135,8 +135,6 @@ FLXSyncTestHarness::FLXSyncTestHarness(const std::string& test_name, ServerSchem
 TestSyncManager FLXSyncTestHarness::make_sync_manager()
 {
     TestSyncManager::Config smc(m_app_config);
-    smc.verbose_sync_client_logging = true;
-    smc.override_sync_route = false;
     return TestSyncManager(std::move(smc), {});
 }
 
@@ -732,7 +730,6 @@ TEST_CASE("flx: bootstrap batching prevents orphan documents", "[sync][flx][app]
     {
         TestSyncManager::Config tsmc(harness.app_config());
         tsmc.should_teardown_test_directory = false;
-        tsmc.verbose_sync_client_logging = true;
         tsmc.override_sync_route = false;
         tsmc.base_path = path_for_interrupted_realm;
 
@@ -784,7 +781,6 @@ TEST_CASE("flx: bootstrap batching prevents orphan documents", "[sync][flx][app]
     // Finally re-open the realm whose bootstrap we interrupted and just wait for it to finish downloading.
     App::clear_cached_apps();
     TestSyncManager::Config tsmc(harness.app_config());
-    tsmc.verbose_sync_client_logging = true;
     tsmc.override_sync_route = false;
     tsmc.base_path = path_for_interrupted_realm;
 
