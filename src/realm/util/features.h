@@ -299,10 +299,17 @@
 
 // We're in amd64 mode
 #if defined(__amd64) || defined(__amd64__) || defined(__x86_64) || defined(__x86_64__) || defined(_M_X64) || \
-    defined(_M_AMD64)
+    defined(_M_AMD64) || defined(__arm64)
 #define REALM_ARCHITECTURE_X86_64 1
 #else
 #define REALM_ARCHITECTURE_X86_64 0
+#endif
+
+// We're in amr64 mode
+#if defined(__arm64)
+#define REALM_ARCHITECTURE_ARM_64 1
+#else
+#define REALM_ARCHITECTURE_ARM_64 0
 #endif
 
 // Address Sanitizer
