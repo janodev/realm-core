@@ -106,6 +106,7 @@ PendingBootstrapStore::PendingBatch PendingBootstrapStore::get_next()
     auto tr = m_db->start_write();
     auto table = tr->get_table(m_table);
     if (table->is_empty()) {
+        m_has_pending = false;
         return {};
     }
 
