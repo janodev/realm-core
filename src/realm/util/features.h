@@ -305,11 +305,18 @@
 #define REALM_ARCHITECTURE_X86_64 0
 #endif
 
-// We're in amr64 mode
-#if defined(__arm64)
+// We're in arm64 mode
+#if defined(__arm64) || defined(__arm64__)
 #define REALM_ARCHITECTURE_ARM_64 1
 #else
 #define REALM_ARCHITECTURE_ARM_64 0
+#endif
+
+// We're in arm64 mode
+#if defined(__arm64_32)
+#define REALM_ARCHITECTURE_ARM_64_32 1
+#else
+#define REALM_ARCHITECTURE_ARM_64_32 0
 #endif
 
 // Address Sanitizer
