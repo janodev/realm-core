@@ -37,11 +37,15 @@ bool valid_virt_path_segment(const std::string& seg)
 _impl::VirtualPathComponents _impl::parse_virtual_path(const std::string& root_path, const std::string& virt_path)
 {
     VirtualPathComponents result;
-    if (virt_path.empty() || virt_path.front() != '/')
+    if (virt_path.empty())
         return result;
 
     std::string real_path = root_path;
     size_t prev_pos = 0;
+    if (virt_path.front() != '/') {
+        --prev_pos;
+        real_path += '/';
+    }
     for (;;) {
         ++prev_pos; // Skip previous slash
         size_t pos = virt_path.find('/', prev_pos);
@@ -90,9 +94,13 @@ bool _impl::map_partial_to_reference_virt_path(const std::string& partial_path, 
 
 void _impl::make_dirs(const std::string& root_path, const std::string& virt_path)
 {
-    REALM_ASSERT(!virt_path.empty() && virt_path.front() == '/');
+    REALM_ASSERT(!virt_path.empty());
     size_t prev_pos = 0;
     std::string real_path = root_path;
+    if (virt_path.front() != '/') {
+        real_path += '/';
+        --prev_pos;
+    }
     for (;;) {
         ++prev_pos; // Skip previous slash
         size_t pos = virt_path.find('/', prev_pos);
