@@ -121,13 +121,11 @@ public:
         auto o = dynamic_cast<const DummyScheduler*>(other);
         return (o != nullptr);
     }
-    bool can_deliver_notifications() const noexcept override
+    bool can_invoke() const noexcept override
     {
         return false;
     }
-
-    void set_notify_callback(std::function<void()>) override {}
-    void notify() override {}
+    void invoke(realm::util::UniqueFunction<void()>&&) override {}
 };
 
 } // anonymous namespace
@@ -753,6 +751,15 @@ void SyncFileActionMetadata::remove()
     m_obj.remove();
     m_realm->commit_transaction();
     m_realm = nullptr;
+}
+
+void SyncFileActionMetadata::set_action(Action new_action)
+{
+    REALM_ASSERT(m_realm);
+    m_realm->verify_thread();
+    m_realm->begin_transaction();
+    m_obj.set<Int>(m_schema.idx_action, static_cast<Int>(new_action));
+    m_realm->commit_transaction();
 }
 
 } // namespace realm

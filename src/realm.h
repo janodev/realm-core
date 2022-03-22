@@ -77,7 +77,8 @@ typedef enum realm_schema_mode {
     RLM_SCHEMA_MODE_AUTOMATIC,
     RLM_SCHEMA_MODE_IMMUTABLE,
     RLM_SCHEMA_MODE_READ_ONLY,
-    RLM_SCHEMA_MODE_RESET_FILE,
+    RLM_SCHEMA_MODE_SOFT_RESET_FILE,
+    RLM_SCHEMA_MODE_HARD_RESET_FILE,
     RLM_SCHEMA_MODE_ADDITIVE_DISCOVERED,
     RLM_SCHEMA_MODE_ADDITIVE_EXPLICIT,
     RLM_SCHEMA_MODE_MANUAL,
@@ -167,6 +168,18 @@ typedef struct realm_value {
     } RLM_ANON_UNION_MEMBER(values);
     realm_value_type_e type;
 } realm_value_t;
+typedef struct realm_key_path_elem {
+    realm_class_key_t object;
+    realm_property_key_t property;
+} realm_key_path_elem_t;
+typedef struct realm_key_path {
+    size_t nb_elements;
+    realm_key_path_elem_t* path_elements;
+} realm_key_path_t;
+typedef struct realm_key_path_array {
+    size_t nb_elements;
+    realm_key_path_t* paths;
+} realm_key_path_array_t;
 
 typedef struct realm_version_id {
     uint64_t version;
@@ -338,8 +351,6 @@ typedef void (*realm_scheduler_notify_func_t)(void* userdata);
 typedef bool (*realm_scheduler_is_on_thread_func_t)(void* userdata);
 typedef bool (*realm_scheduler_is_same_as_func_t)(const void* userdata1, const void* userdata2);
 typedef bool (*realm_scheduler_can_deliver_notifications_func_t)(void* userdata);
-typedef void (*realm_scheduler_set_notify_callback_func_t)(void* userdata, void* callback_userdata,
-                                                           realm_free_userdata_func_t, realm_scheduler_notify_func_t);
 typedef realm_scheduler_t* (*realm_scheduler_default_factory_func_t)(void* userdata);
 
 /**
@@ -743,28 +754,64 @@ RLM_API uint64_t realm_config_get_max_number_of_active_versions(const realm_conf
 RLM_API void realm_config_set_max_number_of_active_versions(realm_config_t*, uint64_t);
 
 /**
+ * Configure realm to be in memory
+ */
+RLM_API void realm_config_set_in_memory(realm_config_t*, bool) RLM_API_NOEXCEPT;
+
+/**
+ * Check if realm is configured in memory
+ */
+RLM_API bool realm_config_get_in_memory(realm_config_t*) RLM_API_NOEXCEPT;
+
+/**
+ * Set FIFO path
+ */
+RLM_API void realm_config_set_fifo_path(realm_config_t*, const char*);
+
+/**
+ Check realm FIFO path
+ */
+RLM_API const char* realm_config_get_fifo_path(realm_config_t*) RLM_API_NOEXCEPT;
+
+/**
+ * If 'cached' is false, always return a new Realm instance.
+ */
+RLM_API void realm_config_set_cached(realm_config_t*, bool cached) RLM_API_NOEXCEPT;
+
+/**
+ * Check if realms are cached
+ */
+RLM_API bool realm_config_get_cached(realm_config_t*) RLM_API_NOEXCEPT;
+
+/**
  * Create a custom scheduler object from callback functions.
  *
  * @param userdata Pointer passed to all callbacks.
- * @param notify Function to trigger a call to the registered callback on the
- *               scheduler's event loop. This function must be thread-safe, or
- *               NULL, in which case the scheduler is considered unable to
- *               deliver notifications.
+ * @param notify Function which will be called whenever the scheduler has work
+ *               to do. Each call to this should trigger a call to
+ *               `realm_scheduler_perform_work()` from within the scheduler's
+ *               event loop. This function must be thread-safe, or NULL, in
+ *               which case the scheduler is considered unable to deliver
+ *               notifications.
  * @param is_on_thread Function to return true if called from the same thread as
  *                     the scheduler. This function must be thread-safe.
  * @param can_deliver_notifications Function to return true if the scheduler can
  *                                  support `notify()`. This function does not
  *                                  need to be thread-safe.
- * @param set_notify_callback Function to accept a callback that will be invoked
- *                            by `notify()` on the scheduler's event loop. This
- *                            function does not need to be thread-safe.
  */
 RLM_API realm_scheduler_t*
 realm_scheduler_new(void* userdata, realm_free_userdata_func_t, realm_scheduler_notify_func_t notify,
                     realm_scheduler_is_on_thread_func_t is_on_thread, realm_scheduler_is_same_as_func_t is_same_as,
-                    realm_scheduler_can_deliver_notifications_func_t can_deliver_notifications,
-                    realm_scheduler_set_notify_callback_func_t set_notify_callback);
+                    realm_scheduler_can_deliver_notifications_func_t can_deliver_notifications);
 
+/**
+ * Performs all of the pending work for the given scheduler.
+ *
+ * This function must be called from within the scheduler's event loop. It must
+ * be called after each time that the notify function passed to the scheduler
+ * is involved.
+ */
+RLM_API void realm_scheduler_perform_work(realm_scheduler_t*);
 /**
  * Create an instance of the default scheduler for the current platform,
  * normally confined to the calling thread.
@@ -805,40 +852,6 @@ RLM_API bool realm_scheduler_has_default_factory(void);
  */
 RLM_API bool realm_scheduler_set_default_factory(void* userdata, realm_free_userdata_func_t,
                                                  realm_scheduler_default_factory_func_t);
-
-/**
- * Trigger a call to the registered notifier callback on the scheduler's event loop.
- *
- * This function is thread-safe.
- */
-RLM_API void realm_scheduler_notify(realm_scheduler_t*);
-
-/**
- * Returns true if the caller is currently running on the scheduler's thread.
- *
- * This function is thread-safe.
- */
-RLM_API bool realm_scheduler_is_on_thread(const realm_scheduler_t*);
-
-/**
- * Returns true if the scheduler is able to deliver notifications.
- *
- * A false return value may indicate that notifications are not applicable for
- * the scheduler, not implementable, or a temporary inability to deliver
- * notifications.
- *
- * This function is not thread-safe.
- */
-RLM_API bool realm_scheduler_can_deliver_notifications(const realm_scheduler_t*);
-
-/**
- * Set the callback that will be invoked by `realm_scheduler_notify()`.
- *
- * This function is not thread-safe.
- */
-RLM_API bool realm_scheduler_set_notify_callback(realm_scheduler_t*, void* userdata, realm_free_userdata_func_t,
-                                                 realm_scheduler_notify_func_t);
-
 
 /**
  * Open a Realm file.
@@ -1029,6 +1042,13 @@ RLM_API realm_schema_t* realm_schema_new(const realm_class_info_t* classes, size
  *       must be called on it.
  */
 RLM_API realm_schema_t* realm_get_schema(const realm_t*);
+
+/**
+ * Get the schema version for this realm.
+ *
+ * This function cannot fail.
+ */
+RLM_API uint64_t realm_get_schema_version(const realm_t* realm);
 
 /**
  * Update the schema of an open realm.
@@ -1365,11 +1385,10 @@ RLM_API realm_link_t realm_object_as_link(const realm_object_t* object);
  *
  * @return A non-null pointer if no exception occurred.
  */
-RLM_API realm_notification_token_t* realm_object_add_notification_callback(realm_object_t*, void* userdata,
-                                                                           realm_free_userdata_func_t free,
-                                                                           realm_on_object_change_func_t on_change,
-                                                                           realm_callback_error_func_t on_error,
-                                                                           realm_scheduler_t*);
+RLM_API realm_notification_token_t*
+realm_object_add_notification_callback(realm_object_t*, void* userdata, realm_free_userdata_func_t free,
+                                       realm_key_path_array_t*, realm_on_object_change_func_t on_change,
+                                       realm_callback_error_func_t on_error, realm_scheduler_t*);
 
 /**
  * Get an object from a thread-safe reference, potentially originating in a
@@ -1576,11 +1595,10 @@ RLM_API bool realm_list_assign(realm_list_t*, const realm_value_t* values, size_
  *
  * @return A non-null pointer if no exception occurred.
  */
-RLM_API realm_notification_token_t* realm_list_add_notification_callback(realm_list_t*, void* userdata,
-                                                                         realm_free_userdata_func_t free,
-                                                                         realm_on_collection_change_func_t on_change,
-                                                                         realm_callback_error_func_t on_error,
-                                                                         realm_scheduler_t*);
+RLM_API realm_notification_token_t*
+realm_list_add_notification_callback(realm_list_t*, void* userdata, realm_free_userdata_func_t free,
+                                     realm_key_path_array_t*, realm_on_collection_change_func_t on_change,
+                                     realm_callback_error_func_t on_error, realm_scheduler_t*);
 
 /**
  * Get an list from a thread-safe reference, potentially originating in a
@@ -1853,11 +1871,10 @@ RLM_API bool realm_set_assign(realm_set_t*, const realm_value_t* values, size_t 
  *
  * @return A non-null pointer if no exception occurred.
  */
-RLM_API realm_notification_token_t* realm_set_add_notification_callback(realm_set_t*, void* userdata,
-                                                                        realm_free_userdata_func_t free,
-                                                                        realm_on_collection_change_func_t on_change,
-                                                                        realm_callback_error_func_t on_error,
-                                                                        realm_scheduler_t*);
+RLM_API realm_notification_token_t*
+realm_set_add_notification_callback(realm_set_t*, void* userdata, realm_free_userdata_func_t free,
+                                    realm_key_path_array_t*, realm_on_collection_change_func_t on_change,
+                                    realm_callback_error_func_t on_error, realm_scheduler_t*);
 /**
  * Get an set from a thread-safe reference, potentially originating in a
  * different `realm_t` instance
@@ -2010,7 +2027,7 @@ RLM_API bool realm_dictionary_assign(realm_dictionary_t*, size_t num_pairs, cons
  */
 RLM_API realm_notification_token_t*
 realm_dictionary_add_notification_callback(realm_dictionary_t*, void* userdata, realm_free_userdata_func_t free,
-                                           realm_on_collection_change_func_t on_change,
+                                           realm_key_path_array_t*, realm_on_collection_change_func_t on_change,
                                            realm_callback_error_func_t on_error, realm_scheduler_t*);
 
 /**
@@ -2037,6 +2054,14 @@ RLM_API realm_dictionary_t* realm_dictionary_from_thread_safe_reference(const re
  */
 RLM_API realm_query_t* realm_query_parse(const realm_t*, realm_class_key_t target_table, const char* query_string,
                                          size_t num_args, const realm_value_t* args);
+
+
+/**
+ * Get textual representation of query
+ *
+ * @return a string containing the description. The string memory is managed by the query object.
+ */
+RLM_API const char* realm_query_get_description(realm_query_t*);
 
 
 /**
@@ -2272,11 +2297,10 @@ RLM_API bool realm_results_sum(realm_results_t*, realm_property_key_t, realm_val
 RLM_API bool realm_results_average(realm_results_t*, realm_property_key_t, realm_value_t* out_average,
                                    bool* out_found);
 
-RLM_API realm_notification_token_t* realm_results_add_notification_callback(realm_results_t*, void* userdata,
-                                                                            realm_free_userdata_func_t,
-                                                                            realm_on_collection_change_func_t,
-                                                                            realm_callback_error_func_t,
-                                                                            realm_scheduler_t*);
+RLM_API realm_notification_token_t*
+realm_results_add_notification_callback(realm_results_t*, void* userdata, realm_free_userdata_func_t,
+                                        realm_key_path_array_t*, realm_on_collection_change_func_t,
+                                        realm_callback_error_func_t, realm_scheduler_t*);
 
 /**
  * Get an results object from a thread-safe reference, potentially originating

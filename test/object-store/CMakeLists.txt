@@ -73,6 +73,12 @@ endif()
 
 target_link_libraries(ObjectStoreTests ObjectStore RealmFFIStatic)
 
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+        target_link_libraries(ObjectStoreTests stdc++fs)
+    endif()
+endif()
+
 create_coverage_target(generate-coverage ObjectStoreTests)
 
 add_test(NAME ObjectStoreTests COMMAND realm-object-store-tests)
@@ -104,11 +110,8 @@ endif()
 
 target_include_directories(ObjectStoreTests PRIVATE ${CATCH_INCLUDE_DIR} ${JSON_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(VSCODE_TEST_RUNNER)
-    # Increase the Catch2 virtual console width so that the Visual Studio Code
-    # Test Explorer extension can parse long test names
-    target_compile_definitions(ObjectStoreTests PRIVATE -DCATCH_CONFIG_CONSOLE_WIDTH=300)
-endif()
+# Increase the Catch2 virtual console width because our test names can be very long and they break test reports
+target_compile_definitions(ObjectStoreTests PRIVATE -DCATCH_CONFIG_CONSOLE_WIDTH=300)
 
 # Resources required for running the tests
 file(GLOB REQUIRED_TEST_FILES
@@ -121,6 +124,7 @@ add_custom_command(TARGET ObjectStoreTests POST_BUILD
 # on Apple platforms we use the built-in CFRunLoop
 # everywhere else it's libuv, except UWP where it doesn't build
 if(NOT APPLE AND NOT WINDOWS_STORE)
+    option(REALM_FETCH_MISSING_DEPENDENCIES "Download missing dependencies with CMake's FetchContent where possible" ON)
     if(REALM_FETCH_MISSING_DEPENDENCIES)
         find_package(LibUV)
     else()
@@ -131,10 +135,14 @@ if(NOT APPLE AND NOT WINDOWS_STORE)
     elseif(REALM_FETCH_MISSING_DEPENDENCIES)
         message(STATUS "LibUV not found, building from source with FetchContent")
         include(FetchContent)
+        set(libUV_Git_TAG "v1.35.0")
+        if(MSVC)
+            set(liUV_Git_TAG "v1.43.0")
+        endif()
         FetchContent_Declare(
             libuv
             GIT_REPOSITORY https://github.com/libuv/libuv.git
-            GIT_TAG        v1.35.0
+            GIT_TAG ${libUV_Git_TAG}
         )
         FetchContent_Populate(libuv)
         add_subdirectory(${libuv_SOURCE_DIR} ${libuv_BINARY_DIR} EXCLUDE_FROM_ALL)
@@ -145,6 +153,10 @@ if(NOT APPLE AND NOT WINDOWS_STORE)
     target_compile_definitions(ObjectStore PUBLIC REALM_HAVE_UV=1)
     get_property(libuv_include_dir TARGET ${libuv_target} PROPERTY INCLUDE_DIRECTORIES)
     target_include_directories(ObjectStore PRIVATE ${libuv_include_dir})
+endif()
+
+if(APPLE)
+    target_compile_definitions(ObjectStoreTests PRIVATE _LIBCPP_DISABLE_AVAILABILITY)
 endif()
 
 add_subdirectory(notifications-fuzzer)

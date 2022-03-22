@@ -24,6 +24,8 @@
 #include <realm/util/optional.hpp>
 
 #include <functional>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 namespace realm {
 
@@ -55,6 +57,11 @@ static inline int64_t random_int()
     thread_local std::mt19937_64 rng(std::random_device{}());
     return rng();
 }
+
+bool chmod_supported(const std::string& path);
+int get_permissions(const std::string& path);
+void chmod(const std::string& path, int permissions);
+std::string get_parent_directory(const std::string& path);
 
 } // namespace realm
 

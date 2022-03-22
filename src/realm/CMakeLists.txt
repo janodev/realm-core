@@ -224,6 +224,7 @@ set(REALM_INSTALL_HEADERS
     util/errno.hpp
     util/ez_websocket.hpp
     util/features.h
+    util/flat_map.hpp
     util/fifo_helper.hpp
     util/file.hpp
     util/file_mapper.hpp

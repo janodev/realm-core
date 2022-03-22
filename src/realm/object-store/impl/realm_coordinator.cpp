@@ -182,6 +182,9 @@ void RealmCoordinator::set_config(const Realm::Config& config)
         throw std::logic_error("Specifying both memory buffer and path is invalid");
     if (!config.realm_data.is_null() && !config.encryption_key.empty())
         throw std::logic_error("Memory buffers do not support encryption");
+    if (config.in_memory && !config.encryption_key.empty()) {
+        throw std::logic_error("Encryption is not supported for in-memory realms");
+    }
     // ResetFile also won't use the migration function, but specifying one is
     // allowed to simplify temporarily switching modes during development
 
@@ -376,6 +379,13 @@ void RealmCoordinator::do_get_realm(Realm::Config config, std::shared_ptr<Realm>
         realm_lock.lock_unchecked();
         if (!m_notifier)
             m_notifier = std::move(notifier);
+        else {
+            // The notifier may be waiting on m_realm_mutex, in which case
+            // destroying it with m_realm_mutex held will deadlock
+            realm_lock.unlock_unchecked();
+            notifier.reset();
+            realm_lock.lock_unchecked();
+        }
     }
     m_weak_realm_notifiers.emplace_back(realm, config.cache);
 
@@ -445,8 +455,10 @@ REALM_NOINLINE void translate_file_exception(StringData path, bool immutable)
                                  util::format("File at path '%1' already exists.", ex.get_path()), ex.what());
     }
     catch (util::File::NotFound const& ex) {
-        throw RealmFileException(RealmFileException::Kind::NotFound, ex.get_path(),
-                                 util::format("Directory at path '%1' does not exist.", ex.get_path()), ex.what());
+        throw RealmFileException(
+            RealmFileException::Kind::NotFound, ex.get_path(),
+            util::format("%1 at path '%2' does not exist.", immutable ? "File" : "Directory", ex.get_path()),
+            ex.what());
     }
     catch (FileFormatUpgradeRequired const& ex) {
         throw RealmFileException(RealmFileException::Kind::FormatUpgradeRequired, path,
@@ -513,7 +525,8 @@ void RealmCoordinator::open_db()
 #endif
 
     bool server_synchronization_mode = m_config.sync_config || m_config.force_sync_history;
-    DBOptions options;
+    bool schema_mode_reset_file =
+        m_config.schema_mode == SchemaMode::SoftResetFile || m_config.schema_mode == SchemaMode::HardResetFile;
     try {
         if (m_config.immutable() && m_config.realm_data) {
             m_db = DB::create(m_config.realm_data, false);
@@ -531,6 +544,8 @@ void RealmCoordinator::open_db()
             history = make_in_realm_history();
         }
 
+        DBOptions options;
+        options.enable_async_writes = true;
         options.durability = m_config.in_memory ? DBOptions::Durability::MemOnly : DBOptions::Durability::Full;
         options.is_immutable = m_config.immutable();
 
@@ -538,8 +553,7 @@ void RealmCoordinator::open_db()
             options.temp_dir = util::normalize_dir(m_config.fifo_files_fallback_path);
         }
         options.encryption_key = m_config.encryption_key.data();
-        options.allow_file_format_upgrade =
-            !m_config.disable_format_upgrade && m_config.schema_mode != SchemaMode::ResetFile;
+        options.allow_file_format_upgrade = !m_config.disable_format_upgrade && !schema_mode_reset_file;
         if (history) {
             options.backup_at_file_format_change = m_config.backup_at_file_format_change;
             m_db = DB::create(std::move(history), m_config.path, options);
@@ -549,14 +563,14 @@ void RealmCoordinator::open_db()
         }
     }
     catch (realm::FileFormatUpgradeRequired const&) {
-        if (m_config.schema_mode != SchemaMode::ResetFile) {
+        if (!schema_mode_reset_file) {
             translate_file_exception(m_config.path, m_config.immutable());
         }
         util::File::remove(m_config.path);
         return open_db();
     }
     catch (UnsupportedFileFormatVersion const&) {
-        if (m_config.schema_mode != SchemaMode::ResetFile) {
+        if (!schema_mode_reset_file) {
             translate_file_exception(m_config.path, m_config.immutable());
         }
         util::File::remove(m_config.path);
@@ -810,13 +824,15 @@ void RealmCoordinator::commit_write(Realm& realm, bool commit_to_disk)
         SyncSession::Internal::nonsync_transact_notify(*m_sync_session, new_version.version);
     }
 #endif
-    if (realm.m_binding_context) {
-        realm.m_binding_context->did_change({}, {});
-    }
-
     if (m_notifier) {
         m_notifier->notify_others();
     }
+
+    if (realm.m_binding_context) {
+        realm.m_binding_context->did_change({}, {});
+    }
+    // note: no longer safe to access `realm` or `this` after this point as
+    // did_change() may have closed the Realm.
 }
 
 void RealmCoordinator::enable_wait_for_change()
@@ -1295,4 +1311,15 @@ bool RealmCoordinator::compact()
 void RealmCoordinator::write_copy(StringData path, BinaryData key, bool allow_overwrite)
 {
     m_db->write_copy(path, key.data(), allow_overwrite);
+}
+
+void RealmCoordinator::async_request_write_mutex(Realm& realm)
+{
+    auto tr = Realm::Internal::get_transaction_ref(realm);
+    m_db->async_request_write_mutex(tr, [realm = realm.shared_from_this()]() mutable {
+        auto& scheduler = *realm->scheduler();
+        scheduler.invoke([realm = std::move(realm)] {
+            Realm::Internal::run_writes(*realm);
+        });
+    });
 }
