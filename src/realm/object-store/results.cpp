@@ -1147,9 +1147,14 @@ Results Results::distinct(std::vector<std::string> const& keypaths) const
     return distinct({std::move(column_keys)});
 }
 
-SectionedResults Results::sectioned_results(SectionedResults::ComparisonFunc2 comparison_func)
+SectionedResults Results::sectioned_results(SectionedResults::ComparisonFunc comparison_func)
 {
     return SectionedResults(*this, std::move(comparison_func));
+}
+
+SectionedResults Results::sectioned_results(util::Optional<StringData> prop_name, SectionedResultsOperator op) REQUIRES(m_mutex)
+{
+    return SectionedResults(*this, prop_name, op);
 }
 
 Results Results::snapshot() const&
