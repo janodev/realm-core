@@ -674,6 +674,78 @@ TEST_CASE("sectioned results") {
         REQUIRE(element_count == 6);
     }
 
+    SECTION("FirstLetter builtin with primitive") {
+        r->begin_transaction();
+        auto o1 = table->create_object();
+        auto str_list = o1.get_list<StringData>(array_string_col);
+        str_list.add("apple");
+        str_list.add("apples");
+        str_list.add("apricot");
+        str_list.add("banana");
+        str_list.add("orange");
+        r->commit_transaction();
+        List lst(r, o1, array_string_col);
+        auto sr = lst.as_results().sectioned_results(util::none, Results::SectionedResultsOperator::FirstLetter);
+
+        REQUIRE(sr.size() == 3);
+        REQUIRE(sr[0].size() == 3);
+        REQUIRE(sr[1].size() == 1);
+        REQUIRE(sr[2].size() == 1);
+
+        std::vector<std::string> expected {
+            "apple",
+            "apples",
+            "apricot",
+            "banana",
+            "orange"
+        };
+
+        std::vector<std::string> expected_keys {
+            "a",
+            "b",
+            "o"
+        };
+
+        int section_count = 0;
+        int element_count = 0;
+        for (size_t i = 0; i < sr.size(); i++) {
+            auto section = sr[i];
+            REQUIRE(section.key().get_string() == expected_keys[section_count]);
+            section_count++;
+            for (size_t y = 0; y < section.size(); y++) {
+                auto val = section[y].get_string();
+                REQUIRE(expected[element_count] == val);
+                element_count++;
+            }
+        }
+        REQUIRE(section_count == 3);
+        REQUIRE(element_count == 5);
+
+        // Insert empty string
+        coordinator->on_change();
+        r->begin_transaction();
+        lst.add(StringData(""));
+        r->commit_transaction();
+
+        expected.insert(expected.begin(), 1, "");
+        expected_keys.insert(expected_keys.begin(), 1, "");
+
+        section_count = 0;
+        element_count = 0;
+        for (size_t i = 0; i < sr.size(); i++) {
+            auto section = sr[i];
+            REQUIRE(section.key().get_string() == expected_keys[section_count]);
+            section_count++;
+            for (size_t y = 0; y < section.size(); y++) {
+                auto val = section[y].get_string();
+                REQUIRE(expected[element_count] == val);
+                element_count++;
+            }
+        }
+        REQUIRE(section_count == 4);
+        REQUIRE(element_count == 6);
+    }
+
     SECTION("notifications") {
         SectionedResultsChangeSet changes;
         auto token = sectioned_results.add_notification_callback([&](SectionedResultsChangeSet c, std::exception_ptr err) {
