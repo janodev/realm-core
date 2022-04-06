@@ -84,6 +84,7 @@ public:
         std::string database_name;
         nlohmann::json partition;
         std::string state;
+        bool recovery_is_disabled = false;
     };
     std::vector<Service> get_services(const std::string& app_id);
     Service get_sync_service(const std::string& app_id);
@@ -91,6 +92,8 @@ public:
     ServiceConfig disable_sync(const std::string& app_id, const std::string& service_id, ServiceConfig sync_config);
     ServiceConfig pause_sync(const std::string& app_id, const std::string& service_id, ServiceConfig sync_config);
     ServiceConfig enable_sync(const std::string& app_id, const std::string& service_id, ServiceConfig sync_config);
+    ServiceConfig set_disable_recovery_to(const std::string& app_id, const std::string& service_id,
+                                          ServiceConfig sync_config, bool disable);
     bool is_sync_enabled(const std::string& app_id);
 
     const std::string& base_url() const noexcept

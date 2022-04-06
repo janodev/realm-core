@@ -1914,7 +1914,8 @@ void track_reset(Transaction& wt, ClientResyncMode mode)
                                            {type_col, mode_val}});
 }
 
-ClientResyncMode reset_precheck_guard(Transaction& wt, ClientResyncMode mode, util::Logger& logger)
+ClientResyncMode reset_precheck_guard(Transaction& wt, ClientResyncMode mode, bool recovery_is_allowed,
+                                      util::Logger& logger)
 {
     if (auto previous_reset = has_pending_reset(wt)) {
         logger.info("A previous reset was detected of type: '%1' at: %2", previous_reset->type, previous_reset->time);
@@ -1950,18 +1951,31 @@ ClientResyncMode reset_precheck_guard(Transaction& wt, ClientResyncMode mode, ut
                                                      previous_reset->type, previous_reset->time, mode));
         }
     }
+    if (!recovery_is_allowed) {
+        if (mode == ClientResyncMode::Recover) {
+            throw ClientResetFailed(
+                "Client reset mode is set to 'Recover' but the server does not allow recovery for this client");
+        }
+        else if (mode == ClientResyncMode::RecoverOrDiscard) {
+            logger.info("Client reset in 'RecoverOrDiscard' is choosing 'DiscardLocal' because the server does not "
+                        "permit recovery for this client");
+            mode = ClientResyncMode::DiscardLocal;
+        }
+    }
     track_reset(wt, mode);
     return mode;
 }
 
 LocalVersionIDs perform_client_reset_diff(DB& db_local, DB& db_remote, sync::SaltedFileIdent client_file_ident,
-                                          util::Logger& logger, ClientResyncMode mode, bool* did_recover_out)
+                                          util::Logger& logger, ClientResyncMode mode, bool recovery_is_allowed,
+                                          bool* did_recover_out)
 {
     logger.info("Client reset, path_local = %1, "
                 "client_file_ident.ident = %2, "
                 "client_file_ident.salt = %3,"
-                "remote = %4, mode = %5",
-                db_local.get_path(), client_file_ident.ident, client_file_ident.salt, db_remote.get_path(), mode);
+                "remote = %4, mode = %5, recovery_is_allowed = %6",
+                db_local.get_path(), client_file_ident.ident, client_file_ident.salt, db_remote.get_path(), mode,
+                recovery_is_allowed);
 
     auto wt_local = db_local.start_write();
     auto history_local = dynamic_cast<ClientHistory*>(wt_local->get_replication()->_get_history_write());
@@ -1972,7 +1986,7 @@ LocalVersionIDs perform_client_reset_diff(DB& db_local, DB& db_remote, sync::Sal
     BinaryData recovered_changeset;
     std::vector<ChunkedBinaryData> local_changes;
 
-    mode = reset_precheck_guard(*wt_local, mode, logger);
+    mode = reset_precheck_guard(*wt_local, mode, recovery_is_allowed, logger);
     bool recover_local_changes = (mode == ClientResyncMode::Recover || mode == ClientResyncMode::RecoverOrDiscard);
 
     if (recover_local_changes) {

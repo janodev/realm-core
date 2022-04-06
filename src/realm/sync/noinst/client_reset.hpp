@@ -92,7 +92,8 @@ struct LocalVersionIDs {
     realm::VersionID new_version;
 };
 LocalVersionIDs perform_client_reset_diff(DB& db, DB& db_remote, sync::SaltedFileIdent client_file_ident,
-                                          util::Logger& logger, ClientResyncMode mode, bool* did_recover_out);
+                                          util::Logger& logger, ClientResyncMode mode, bool recovery_is_allowed,
+                                          bool* did_recover_out);
 
 } // namespace client_reset
 } // namespace _impl
