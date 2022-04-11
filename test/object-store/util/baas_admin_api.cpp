@@ -462,21 +462,21 @@ AdminAPISession AdminAPISession::login(const std::string& base_url, const std::s
     return AdminAPISession(std::move(base_url), std::move(access_token), std::move(group_id));
 }
 
-void AdminAPISession::revoke_user_sessions(const std::string& user_id, const std::string& app_id)
+void AdminAPISession::revoke_user_sessions(const std::string& user_id, const std::string& app_id) const
 {
     auto endpoint = apps()[app_id]["users"][user_id]["logout"];
     auto response = endpoint.put("");
     REALM_ASSERT(response.http_status_code == 204);
 }
 
-void AdminAPISession::disable_user_sessions(const std::string& user_id, const std::string& app_id)
+void AdminAPISession::disable_user_sessions(const std::string& user_id, const std::string& app_id) const
 {
     auto endpoint = apps()[app_id]["users"][user_id]["disable"];
     auto response = endpoint.put("");
     REALM_ASSERT(response.http_status_code == 204);
 }
 
-void AdminAPISession::enable_user_sessions(const std::string& user_id, const std::string& app_id)
+void AdminAPISession::enable_user_sessions(const std::string& user_id, const std::string& app_id) const
 {
     auto endpoint = apps()[app_id]["users"][user_id]["enable"];
     auto response = endpoint.put("");
@@ -484,7 +484,7 @@ void AdminAPISession::enable_user_sessions(const std::string& user_id, const std
 }
 
 // returns false for an invalid/expired access token
-bool AdminAPISession::verify_access_token(const std::string& access_token, const std::string& app_id)
+bool AdminAPISession::verify_access_token(const std::string& access_token, const std::string& app_id) const
 {
     auto endpoint = apps()[app_id]["users"]["verify_token"];
     nlohmann::json request_body{
@@ -507,20 +507,20 @@ bool AdminAPISession::verify_access_token(const std::string& access_token, const
     return false;
 }
 
-void AdminAPISession::set_development_mode_to(const std::string& app_id, bool enable)
+void AdminAPISession::set_development_mode_to(const std::string& app_id, bool enable) const
 {
     auto endpoint = apps()[app_id]["sync"]["config"];
     endpoint.put_json({{"development_mode_enabled", enable}});
 }
 
-void AdminAPISession::delete_app(const std::string& app_id)
+void AdminAPISession::delete_app(const std::string& app_id) const
 {
     auto app_endpoint = apps()[app_id];
     auto resp = app_endpoint.del();
     REALM_ASSERT(resp.http_status_code == 204);
 }
 
-std::vector<AdminAPISession::Service> AdminAPISession::get_services(const std::string& app_id)
+std::vector<AdminAPISession::Service> AdminAPISession::get_services(const std::string& app_id) const
 {
     auto endpoint = apps()[app_id]["services"];
     auto response = endpoint.get_json();
@@ -533,7 +533,7 @@ std::vector<AdminAPISession::Service> AdminAPISession::get_services(const std::s
 }
 
 
-AdminAPISession::Service AdminAPISession::get_sync_service(const std::string& app_id)
+AdminAPISession::Service AdminAPISession::get_sync_service(const std::string& app_id) const
 {
     auto services = get_services(app_id);
     auto sync_service = std::find_if(services.begin(), services.end(), [&](auto s) {
@@ -549,13 +549,13 @@ nlohmann::json convert_config(AdminAPISession::ServiceConfig config)
         {"database_name", config.database_name}, {"partition", config.partition}, {"state", config.state}};
 }
 
-AdminAPIEndpoint AdminAPISession::service_config_endpoint(const std::string& app_id, const std::string& service_id)
+AdminAPIEndpoint AdminAPISession::service_config_endpoint(const std::string& app_id, const std::string& service_id) const
 {
     return apps()[app_id]["services"][service_id]["config"];
 }
 
 AdminAPISession::ServiceConfig AdminAPISession::disable_sync(const std::string& app_id, const std::string& service_id,
-                                                             AdminAPISession::ServiceConfig sync_config)
+                                                             AdminAPISession::ServiceConfig sync_config) const
 {
     auto endpoint = service_config_endpoint(app_id, service_id);
     if (sync_config.state != "") {
@@ -566,7 +566,7 @@ AdminAPISession::ServiceConfig AdminAPISession::disable_sync(const std::string& 
 }
 
 AdminAPISession::ServiceConfig AdminAPISession::pause_sync(const std::string& app_id, const std::string& service_id,
-                                                           AdminAPISession::ServiceConfig sync_config)
+                                                           AdminAPISession::ServiceConfig sync_config) const
 {
     auto endpoint = service_config_endpoint(app_id, service_id);
     if (sync_config.state != "disabled") {
@@ -577,7 +577,7 @@ AdminAPISession::ServiceConfig AdminAPISession::pause_sync(const std::string& ap
 }
 
 AdminAPISession::ServiceConfig AdminAPISession::enable_sync(const std::string& app_id, const std::string& service_id,
-                                                            AdminAPISession::ServiceConfig sync_config)
+                                                            AdminAPISession::ServiceConfig sync_config) const
 {
     auto endpoint = service_config_endpoint(app_id, service_id);
     sync_config.state = "enabled";
@@ -586,7 +586,7 @@ AdminAPISession::ServiceConfig AdminAPISession::enable_sync(const std::string& a
 }
 
 AdminAPISession::ServiceConfig AdminAPISession::get_config(const std::string& app_id,
-                                                           const AdminAPISession::Service& service)
+                                                           const AdminAPISession::Service& service) const
 {
     auto endpoint = service_config_endpoint(app_id, service.id);
     auto response = endpoint.get_json();
@@ -603,7 +603,7 @@ AdminAPISession::ServiceConfig AdminAPISession::get_config(const std::string& ap
     return config;
 }
 
-bool AdminAPISession::is_sync_enabled(const std::string& app_id)
+bool AdminAPISession::is_sync_enabled(const std::string& app_id) const
 {
     auto sync_service = get_sync_service(app_id);
     auto config = get_config(app_id, sync_service);
@@ -999,7 +999,7 @@ TEST_CASE("app: baas admin api", "[sync][app]") {
                        {{"coordinates", PropertyType::Double | PropertyType::Array}}}};
 
         auto test_app_config = minimal_app_config(base_url, "test", schema);
-        auto app_id = create_app(test_app_config);
+        create_app(test_app_config);
     }
 
     SECTION("embedded object with array") {
@@ -1011,7 +1011,7 @@ TEST_CASE("app: baas admin api", "[sync][app]") {
             {"c", {{"_id", PropertyType::String, true}, {"d_str", PropertyType::String}}},
         };
         auto test_app_config = minimal_app_config(base_url, "test", schema);
-        auto app_id = create_app(test_app_config);
+        create_app(test_app_config);
     }
 
     SECTION("dictionaries") {
@@ -1020,7 +1020,7 @@ TEST_CASE("app: baas admin api", "[sync][app]") {
         };
 
         auto test_app_config = minimal_app_config(base_url, "test", schema);
-        auto app_id = create_app(test_app_config);
+        create_app(test_app_config);
     }
 
     SECTION("set") {
@@ -1029,7 +1029,7 @@ TEST_CASE("app: baas admin api", "[sync][app]") {
         };
 
         auto test_app_config = minimal_app_config(base_url, "test", schema);
-        auto app_id = create_app(test_app_config);
+        create_app(test_app_config);
     }
 }
 #endif
