@@ -361,6 +361,28 @@ public:
     }
 };
 
+/// Used for any I/O related exception. Note the derived exception
+/// types that are used for various specific types of errors.
+class FileAccessError : public RuntimeError {
+public:
+    FileAccessError(ErrorCodes::Error code, const std::string& msg, const std::string& path = {})
+        : RuntimeError(code, msg + ", path: '" + path + "'")
+        , m_path(path)
+    {
+        REALM_ASSERT(ErrorCodes::error_categories(code).test(ErrorCategory::file_access));
+    }
+
+    /// Return the associated file system path, or the empty string if there is
+    /// no associated file system path, or if the file system path is unknown.
+    const std::string& get_path() const
+    {
+        return m_path;
+    }
+
+private:
+    std::string m_path;
+};
+
 namespace query_parser {
 
 /// Exception thrown when parsing fails due to invalid syntax.

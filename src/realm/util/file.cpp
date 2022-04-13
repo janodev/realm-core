@@ -48,9 +48,6 @@
 #include <realm/util/features.h>
 #include <realm/util/file.hpp>
 
-using namespace realm;
-using namespace realm::util;
-
 namespace {
 #ifdef _WIN32 // Windows - GetLastError()
 
@@ -110,9 +107,10 @@ size_t get_page_size()
 // It could also have been a static local variable, but Valgrind/Helgrind gives a false error on that.
 size_t cached_page_size = get_page_size();
 
-bool for_each_helper(const std::string& path, const std::string& dir, File::ForEachHandler& handler)
+bool for_each_helper(const std::string& path, const std::string& dir, realm::util::File::ForEachHandler& handler)
 {
-    DirScanner ds{path}; // Throws
+    using File = realm::util::File;
+    realm::util::DirScanner ds{path}; // Throws
     std::string name;
     while (ds.next(name)) {                              // Throws
         std::string subpath = File::resolve(name, path); // Throws
@@ -183,8 +181,40 @@ struct WindowsFileHandleHolder {
 } // anonymous namespace
 
 
-namespace realm {
-namespace util {
+namespace realm::util {
+
+/// Thrown if the user does not have permission to open or create
+/// the specified file in the specified access mode.
+class File::PermissionDenied : public FileAccessError {
+public:
+    PermissionDenied(const std::string& msg, const std::string& path)
+        : FileAccessError(ErrorCodes::PermissionDenied, msg, path)
+    {
+    }
+};
+
+
+/// Thrown if the directory part of the specified path was not
+/// found, or create_Never was specified and the file did no
+/// exist.
+class File::NotFound : public FileAccessError {
+public:
+    NotFound(const std::string& msg, const std::string& path)
+        : FileAccessError(ErrorCodes::FileNotFound, msg, path)
+    {
+    }
+};
+
+
+/// Thrown if create_Always was specified and the file did already
+/// exist.
+class File::Exists : public FileAccessError {
+public:
+    Exists(const std::string& msg, const std::string& path)
+        : FileAccessError(ErrorCodes::FileAlreadyExists, msg, path)
+    {
+    }
+};
 
 
 bool try_make_dir(const std::string& path)
@@ -206,7 +236,7 @@ bool try_make_dir(const std::string& path)
         case EROFS:
             throw File::PermissionDenied(msg, path);
         default:
-            throw File::AccessError(msg, path); // LCOV_EXCL_LINE
+            throw FileAccessError(ErrorCodes::FileOperationFailed, msg, path); // LCOV_EXCL_LINE
     }
 }
 
@@ -253,7 +283,7 @@ bool try_remove_dir(const std::string& path)
         case ENOENT:
             return false;
         default:
-            throw File::AccessError(msg, path); // LCOV_EXCL_LINE
+            throw FileAccessError(ErrorCodes::FileOperationFailed, msg, path); // LCOV_EXCL_LINE
     }
 }
 
@@ -298,7 +328,7 @@ std::string make_temp_dir()
     std::filesystem::path path;
     for (;;) {
         if (GetTempFileNameW(temp.c_str(), L"rlm", 0, buffer) == 0)
-            throw std::system_error(GetLastError(), std::system_category(), "GetTempFileName() failed");
+            throw FileAccessError(ErrorCodes::FileOperationFailed, "GetTempFileName() failed");
         path = buffer;
         std::filesystem::remove(path);
         try {
@@ -317,7 +347,7 @@ std::string make_temp_dir()
 #if REALM_ANDROID
     char buffer[] = "/data/local/tmp/realm_XXXXXX";
     if (mkdtemp(buffer) == 0) {
-        throw std::system_error(errno, std::system_category(), "mkdtemp() failed"); // LCOV_EXCL_LINE
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "mkdtemp() failed", buffer); // LCOV_EXCL_LINE
     }
     return std::string(buffer);
 #else
@@ -330,7 +360,7 @@ std::string make_temp_dir()
     std::unique_ptr<char[]> buffer = std::make_unique<char[]>(tmp.size()); // Throws
     memcpy(buffer.get(), tmp.c_str(), tmp.size());
     if (mkdtemp(buffer.get()) == 0) {
-        throw std::system_error(errno, std::system_category(), "mkdtemp() failed"); // LCOV_EXCL_LINE
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "mkdtemp() failed", tmp); // LCOV_EXCL_LINE
     }
     return std::string(buffer.get());
 #endif
@@ -342,11 +372,6 @@ size_t page_size()
 {
     return cached_page_size;
 }
-
-
-} // namespace util
-} // namespace realm
-
 
 void File::open_internal(const std::string& path, AccessMode a, CreateMode c, int flags, bool* success)
 {
@@ -416,7 +441,7 @@ void File::open_internal(const std::string& path, AccessMode a, CreateMode c, in
         case ERROR_FILE_EXISTS:
             throw Exists(msg, path);
         default:
-            throw AccessError(msg, path);
+            throw FileAccessError(ErrorCodes::FileOperationFailed, msg, path);
     }
 
 #else // POSIX version
@@ -473,7 +498,7 @@ void File::open_internal(const std::string& path, AccessMode a, CreateMode c, in
         case EEXIST:
             throw Exists(msg, path);
         default:
-            throw AccessError(msg, path); // LCOV_EXCL_LINE
+            throw FileAccessError(ErrorCodes::FileOperationFailed, msg, path); // LCOV_EXCL_LINE
     }
 
 #endif
@@ -651,7 +676,7 @@ uint64_t File::get_file_pos(FileDesc fd)
     li.QuadPart = 0;
     bool ok = SetFilePointerEx(fd, li, &res, FILE_CURRENT);
     if (!ok)
-        throw std::system_error(GetLastError(), std::system_category(), "SetFilePointer() failed");
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "SetFilePointer() failed");
 
     return uint64_t(res.QuadPart);
 #else
@@ -676,11 +701,11 @@ File::SizeType File::get_size_static(FileDesc fd)
     if (GetFileSizeEx(fd, &large_int)) {
         File::SizeType size;
         if (int_cast_with_overflow_detect(large_int.QuadPart, size))
-            throw util::overflow_error("File size overflow");
+            throw RuntimeError(ErrorCodes::RangeError, "File size overflow");
 
         return size;
     }
-    throw std::system_error(GetLastError(), std::system_category(), "GetFileSizeEx() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "GetFileSizeEx() failed");
 
 #else // POSIX version
 
@@ -688,11 +713,11 @@ File::SizeType File::get_size_static(FileDesc fd)
     if (::fstat(fd, &statbuf) == 0) {
         SizeType size;
         if (int_cast_with_overflow_detect(statbuf.st_size, size))
-            throw util::overflow_error("File size overflow");
+            throw RuntimeError(ErrorCodes::RangeError, "File size overflow");
 
         return size;
     }
-    throw std::system_error(errno, std::system_category(), "fstat() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "fstat() failed");
 
 #endif
 }
@@ -734,7 +759,7 @@ void File::resize(SizeType size)
             std::string msg = get_last_error_msg("SetEndOfFile() failed: ", err);
             throw OutOfDiskSpace(msg);
         }
-        throw std::system_error(err, std::system_category(), "SetEndOfFile() failed");
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "SetEndOfFile() failed");
     }
 
     // Restore file position
@@ -747,7 +772,7 @@ void File::resize(SizeType size)
 
     off_t size2;
     if (int_cast_with_overflow_detect(size, size2))
-        throw util::overflow_error("File size overflow");
+        throw RuntimeError(ErrorCodes::RangeError, "File size overflow");
 
     // POSIX specifies that introduced bytes read as zero. This is not
     // required by File::resize().
@@ -757,7 +782,7 @@ void File::resize(SizeType size)
             std::string msg = get_errno_msg("ftruncate() failed: ", err);
             throw OutOfDiskSpace(msg);
         }
-        throw std::system_error(err, std::system_category(), "ftruncate() failed");
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "ftruncate() failed");
     }
 
 #endif
@@ -777,8 +802,9 @@ void File::prealloc(size_t size)
         new_size = static_cast<size_t>(data_size_to_encrypted_size(size));
         REALM_ASSERT(size == static_cast<size_t>(encrypted_size_to_data_size(new_size)));
         if (new_size < size) {
-            throw util::runtime_error("File size overflow: data_size_to_encrypted_size(" +
-                                      realm::util::to_string(size) + ") == " + realm::util::to_string(new_size));
+            throw RuntimeError(ErrorCodes::RangeError, "File size overflow: data_size_to_encrypted_size(" +
+                                                           realm::util::to_string(size) +
+                                                           ") == " + realm::util::to_string(new_size));
         }
     }
 
@@ -830,13 +856,13 @@ void File::prealloc(size_t size)
 
     size_t allocated_size;
     if (int_cast_with_overflow_detect(statbuf.st_blocks, allocated_size)) {
-        throw util::runtime_error("Overflow on block conversion to size_t " +
-                                  realm::util::to_string(statbuf.st_blocks));
+        throw RuntimeError(ErrorCodes::RangeError,
+                           "Overflow on block conversion to size_t " + realm::util::to_string(statbuf.st_blocks));
     }
     if (int_multiply_with_overflow_detect(allocated_size, S_BLKSIZE)) {
-        throw util::runtime_error(
-            "Overflow computing existing file space allocation blocks: " + realm::util::to_string(allocated_size) +
-            " block size: " + realm::util::to_string(S_BLKSIZE));
+        throw RuntimeError(ErrorCodes::RangeError, "Overflow computing existing file space allocation blocks: " +
+                                                       realm::util::to_string(allocated_size) +
+                                                       " block size: " + realm::util::to_string(S_BLKSIZE));
     }
 
     // Only attempt to preallocate space if there's not already sufficient free space in the file.
@@ -969,20 +995,20 @@ void File::seek_static(FileDesc fd, SizeType position)
 
     LARGE_INTEGER large_int;
     if (int_cast_with_overflow_detect(position, large_int.QuadPart))
-        throw util::overflow_error("File position overflow");
+        throw RuntimeError(ErrorCodes::RangeError, "File position overflow");
 
     if (!SetFilePointerEx(fd, large_int, 0, FILE_BEGIN))
-        throw std::system_error(GetLastError(), std::system_category(), "SetFilePointerEx() failed");
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "SetFilePointerEx() failed");
 
 #else // POSIX version
 
     off_t position2;
     if (int_cast_with_overflow_detect(position, position2))
-        throw util::overflow_error("File position overflow");
+        throw RuntimeError(ErrorCodes::RangeError, "File position overflow");
 
     if (0 <= ::lseek(fd, position2, SEEK_SET))
         return;
-    throw std::system_error(errno, std::system_category(), "lseek() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "lseek() failed");
 
 #endif
 }
@@ -999,7 +1025,7 @@ void File::sync()
 
     if (FlushFileBuffers(m_fd))
         return;
-    throw std::system_error(GetLastError(), std::system_category(), "FlushFileBuffers() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "FlushFileBuffers() failed");
 
 #elif REALM_PLATFORM_APPLE
 
@@ -1405,7 +1431,7 @@ bool File::try_remove(const std::string& path)
         case ENOENT:
             return false;
         default:
-            throw AccessError(msg, path);
+            throw FileAccessError(ErrorCodes::FileOperationFailed, msg, path);
     }
 }
 
@@ -1433,7 +1459,7 @@ void File::move(const std::string& old_path, const std::string& new_path)
         case ENOENT:
             throw File::NotFound(msg, old_path);
         default:
-            throw AccessError(msg, old_path);
+            throw FileAccessError(ErrorCodes::FileOperationFailed, msg, old_path);
     }
 }
 
@@ -1484,7 +1510,7 @@ bool File::is_same_file_static(FileDesc f1, FileDesc f2)
                    fi1.VolumeSerialNumber == fi2.VolumeSerialNumber;
         }
     }
-    throw std::system_error(GetLastError(), std::system_category(), "GetFileInformationByHandleEx() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "GetFileInformationByHandleEx() failed");
 
 #else // POSIX version
 
@@ -1495,7 +1521,7 @@ bool File::is_same_file_static(FileDesc f1, FileDesc f2)
         if (::fstat(f2, &statbuf) == 0)
             return device_id == statbuf.st_dev && inode_num == statbuf.st_ino;
     }
-    throw std::system_error(errno, std::system_category(), "fstat() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "fstat() failed");
 
 #endif
 }
@@ -1517,7 +1543,7 @@ File::UniqueID File::get_unique_id() const
     if (::fstat(m_fd, &statbuf) == 0) {
         return UniqueID(statbuf.st_dev, statbuf.st_ino);
     }
-    throw std::system_error(errno, std::system_category(), "fstat() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "fstat() failed");
 #endif
 }
 
@@ -1541,7 +1567,7 @@ bool File::get_unique_id(const std::string& path, File::UniqueID& uid)
     // File doesn't exist
     if (err == ENOENT)
         return false;
-    throw std::system_error(err, std::system_category(), "fstat() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "fstat() failed");
 #endif
 }
 
@@ -1563,7 +1589,7 @@ bool File::is_removed() const
     struct stat statbuf;
     if (::fstat(m_fd, &statbuf) == 0)
         return statbuf.st_nlink == 0;
-    throw std::system_error(errno, std::system_category(), "fstat() failed");
+    throw FileAccessError(ErrorCodes::FileOperationFailed, "fstat() failed");
 
 #endif
 }
@@ -1615,7 +1641,7 @@ std::string File::resolve(const std::string& path, const std::string& base_dir)
 #else
     static_cast<void>(path);
     static_cast<void>(base_dir);
-    throw util::runtime_error("Not yet supported");
+    throw NotImplemented;
 #endif
 }
 
@@ -1639,7 +1665,7 @@ void File::set_encryption_key(const char* key)
     }
 #else
     if (key) {
-        throw util::runtime_error("Encryption not enabled");
+        throw LogicError(ErrorCodes::NotSupported, "Encryption not enabled");
     }
 #endif
 }
@@ -1709,12 +1735,12 @@ std::time_t File::last_write_time(const std::string& path)
                                                      OPEN_EXISTING, nullptr));
 
     if (fileHandle == INVALID_HANDLE_VALUE) {
-        throw std::system_error(GetLastError(), std::system_category(), "CreateFileW failed");
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "CreateFileW failed");
     }
 
     FILETIME mtime = {0};
     if (!::GetFileTime(fileHandle, nullptr, nullptr, &mtime)) {
-        throw std::system_error(GetLastError(), std::system_category(), "GetFileTime failed");
+        throw FileAccessError(ErrorCodes::FileOperationFailed, "GetFileTime failed");
     }
 
     auto tp = file_time_to_system_clock(mtime);
@@ -1769,7 +1795,7 @@ DirScanner::DirScanner(const std::string& path, bool allow_missing)
                     return;
                 throw File::NotFound(msg, path);
             default:
-                throw File::AccessError(msg, path);
+                throw FileAccessError(ErrorCodes::FileOperationFailed, msg, path);
         }
     }
 }
@@ -1867,3 +1893,5 @@ bool DirScanner::next(std::string&)
 }
 
 #endif
+
+} // namespace realm::util
